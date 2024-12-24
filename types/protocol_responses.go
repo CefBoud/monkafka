@@ -1,6 +1,7 @@
-package main
+package types
 
-// Requests
+// Protocol specific types
+
 // type RecordBatch struct {
 // 	BaseOffset           int64
 // 	BatchLength          int32
@@ -17,92 +18,85 @@ package main
 // 	records              []Record
 // }
 
-// type Record struct {
-// 	Length         int // varint (usually int32 or int64 depending on the actual size)
-// 	Attributes     int8
-// 	TimestampDelta int64 // varlong: delta added the batch's BaseTimestamp
-// 	OffsetDelta    int   // varint: delta added to the batch's BaseOffset
-// 	KeyLength      int   // varint
-// 	Key            []byte
-// 	ValueLen       int // varint
-// 	Value          []byte
-// 	Headers        []Header
-// }
-// type Header struct {
-// 	HeaderKeyLength   int
-// 	HeaderKey         string
-// 	HeaderValueLength int
-// 	Value             []byte
-// }
-
-type TopicData struct {
-	name           string
-	partition_data []PartitionData
-}
-type PartitionData struct {
-	index       uint32
-	recordsData []byte
-}
+//	type Record struct {
+//		Length         int // varint (usually int32 or int64 depending on the actual size)
+//		Attributes     int8
+//		TimestampDelta int64 // varlong: delta added the batch's BaseTimestamp
+//		OffsetDelta    int   // varint: delta added to the batch's BaseOffset
+//		KeyLength      int   // varint
+//		Key            []byte
+//		ValueLen       int // varint
+//		Value          []byte
+//		Headers        []Header
+//	}
+//
+//	type Header struct {
+//		HeaderKeyLength   int
+//		HeaderKey         string
+//		HeaderValueLength int
+//		Value             []byte
+//	}
+var MINUS_ONE int = -1
 
 // Responses
 type APIKey struct {
-	apiKey     uint16
-	minVersion uint16
-	maxVersion uint16
+	ApiKey     uint16
+	MinVersion uint16
+	MaxVersion uint16
 }
 
 type APIVersionsResponse struct {
-	errorCode uint16
-	apiKeys   []APIKey
+	ErrorCode uint16
+	ApiKeys   []APIKey
 }
 
-type broker struct {
-	node_id uint32
-	host    string
-	port    uint32
-	rack    string //nullable: if it is empty, we set length to -1
+type MetadataResponseBroker struct {
+	Node_id uint32
+	Host    string
+	Port    uint32
+	Rack    string //nullable: if it is empty, we set length to -1
 }
-type partition struct {
-	error_code       uint16
-	partition_index  uint32
-	leader_id        uint32
-	leader_epoch     uint32
-	replica_nodes    []uint32
-	isr_nodes        []uint32
-	offline_replicas []uint32
+type MetadataResponsePartition struct {
+	Error_code       uint16
+	Partition_index  uint32
+	Leader_id        uint32
+	Leader_epoch     uint32
+	Replica_nodes    []uint32
+	Isr_nodes        []uint32
+	Offline_replicas []uint32
 }
-type topic struct {
-	error_code                  int16
-	name                        string
-	topic_id                    [16]byte
-	is_internal                 bool
-	partitions                  []partition
-	topic_authorized_operations uint32
+type MetadataResponseTopic struct {
+	Error_code                  int16
+	Name                        string
+	Topic_id                    [16]byte
+	Is_internal                 bool
+	Partitions                  []MetadataResponsePartition
+	Topic_authorized_operations uint32
 }
-type metadataResponse struct {
-	throttle_time_ms int32
-	brokers          []broker
-	cluster_id       string //nullable
-	controller_id    int32
-	topics           []topic
+type MetadataResponse struct {
+	Throttle_time_ms int32
+	Brokers          []MetadataResponseBroker
+	Cluster_id       string //nullable
+	Controller_id    int32
+	Topics           []MetadataResponseTopic
 }
 
 type CreateTopicsResponse struct {
 	ThrottleTimeMs uint32
-	Topics         []Topic
+	Topics         []CreateTopicsResponseTopic
 }
 
-type Topic struct {
+type CreateTopicsResponseTopic struct {
 	Name              string
 	TopicID           [16]byte
 	ErrorCode         uint16
 	ErrorMessage      string
 	NumPartitions     uint32
 	ReplicationFactor uint16
-	Configs           []Config
+	Configs           []CreateTopicsResponseConfig
 }
 
-type Config struct {
+type CreateTopicsResponseConfig struct {
 	Name         string
 	Value        string
 	ReadOnly     bool
@@ -110,14 +104,22 @@ type Config struct {
 	IsSensitive  bool
 }
 
-type InitProducerId struct {
-	throttle_time_ms uint32
-	error_code       uint16
-	producer_id      uint64
-	producer_epoch   uint16
+type InitProducerIdResponse struct {
+	Throttle_time_ms uint32
+	Error_code       uint16
+	Producer_id      uint64
+	Producer_epoch   uint16
 }
 
 // produce
+type ProduceResponseTopicData struct {
+	Name           string
+	Partition_data []ProduceResponsePartitionData
+}
+type ProduceResponsePartitionData struct {
+	Index       uint32
+	RecordsData []byte
+}
 type ProduceResponse struct {
 	ProduceTopicResponses []ProduceTopicResponse
 	ThrottleTimeMs        uint32
@@ -142,7 +144,7 @@ type RecordError struct {
 }
 
 // FindCoordinator
-type Coordinator struct {
+type FindCoordinatorResponseCoordinator struct {
 	Key          string
 	NodeID       uint32
 	Host         string
@@ -153,7 +155,7 @@ type Coordinator struct {
 
 // JoinGroup
 
-type Member struct {
+type JoinGroupResponseMember struct {
 	MemberID        string
 	GroupInstanceID string
 	Metadata        []byte
@@ -168,7 +170,7 @@ type JoinGroupResponse struct {
 	Leader         string
 	SkipAssignment bool
 	MemberID       string
-	Members        []Member
+	Members        []JoinGroupResponseMember
 }
 
 // Offset Fetch

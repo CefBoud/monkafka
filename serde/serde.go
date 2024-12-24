@@ -1,6 +1,12 @@
-package main
+package serde
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+
+	"github.com/CefBoud/monkafka/types"
+)
+
+var Encoding = binary.BigEndian
 
 type Encoder struct {
 	b      []byte
@@ -56,79 +62,104 @@ func (e *Encoder) Bytes() []byte {
 	return e.b[:e.offset]
 }
 
+func (e *Encoder) FinishAndReturn() []byte {
+	e.EndStruct() // close struct
+	e.PutLen()    // put the final length
+	return e.Bytes()
+}
+
+func ParseHeader(buffer []byte, connAddr string) types.Request {
+	req := types.Request{}
+	req.Length = Encoding.Uint32(buffer)
+	req.RequestApiKey = Encoding.Uint16(buffer[4:])
+	req.RequestApiVersion = Encoding.Uint16(buffer[6:])
+	req.CorrelationID = Encoding.Uint32(buffer[8:])
+	clientIdLen := Encoding.Uint16(buffer[12:])
+	req.ClientId = string(buffer[14 : 14+clientIdLen])
+	req.ConnectionAddress = connAddr
+	req.Buffer = buffer
+	return req
+}
+
 type Decoder struct {
 	b      []byte
-	offset int
+	Offset int
 }
 
 func NewDecoder(b []byte) Decoder {
 	return Decoder{b: b}
 }
+
 func (d *Decoder) SkipHeader() {
 	// msg len 4 + api key 2 + api version 2 + correlation id 4
 	// + len(client_id) 2 + client_id X +  no tags 1
 	headerLength := 4 + 2 + 2 + 4 + 2 + Encoding.Uint16(d.b[12:]) + 1
-	d.offset += int(headerLength)
+	d.Offset += int(headerLength)
 }
 func (d *Decoder) UInt32() uint32 {
-	res := Encoding.Uint32(d.b[d.offset:])
-	d.offset += 4
+	res := Encoding.Uint32(d.b[d.Offset:])
+	d.Offset += 4
 	return res
 }
 func (d *Decoder) UInt64() uint64 {
-	res := Encoding.Uint64(d.b[d.offset:])
-	d.offset += 8
+	res := Encoding.Uint64(d.b[d.Offset:])
+	d.Offset += 8
 	return res
 }
 func (d *Decoder) UInt16() uint16 {
-	res := Encoding.Uint16(d.b[d.offset:])
-	d.offset += 2
+	res := Encoding.Uint16(d.b[d.Offset:])
+	d.Offset += 2
 	return res
 }
 func (d *Decoder) Bool() bool {
 	res := false
-	if d.b[d.offset] > 0 {
+	if d.b[d.Offset] > 0 {
 		res = true
 	}
-	d.offset++
+	d.Offset++
 	return res
+}
+func (d *Decoder) UUID() [16]byte {
+	uuid := d.b[d.Offset : d.Offset+16]
+	d.Offset += 16
+	return [16]byte(uuid)
 }
 
 func (d *Decoder) String() string {
-	stringLen, n := binary.Uvarint(d.b[d.offset:])
-	d.offset += n
+	stringLen, n := binary.Uvarint(d.b[d.Offset:])
+	d.Offset += n
 	if stringLen == 0 { // nullable string
 		return ""
 	}
 	stringLen--
 
-	res := string(d.b[d.offset : d.offset+int(stringLen)])
-	d.offset += int(stringLen)
+	res := string(d.b[d.Offset : d.Offset+int(stringLen)])
+	d.Offset += int(stringLen)
 	return res
 }
 
 func (d *Decoder) Bytes() []byte {
 	bytesLen := int(d.CompactArrayLen())
-	res := d.b[d.offset : d.offset+bytesLen]
-	d.offset += bytesLen
+	res := d.b[d.Offset : d.Offset+bytesLen]
+	d.Offset += bytesLen
 	return res
 }
 func (d *Decoder) BytesWithLen() []byte {
-	bytesLen, n := binary.Uvarint(d.b[d.offset:])
+	bytesLen, n := binary.Uvarint(d.b[d.Offset:])
 	bytesLen--
-	res := d.b[d.offset : d.offset+int(bytesLen)+n]
-	d.offset += int(bytesLen) + n
+	res := d.b[d.Offset : d.Offset+int(bytesLen)+n]
+	d.Offset += int(bytesLen) + n
 	return res
 }
 
 func (d *Decoder) CompactArrayLen() uint64 {
-	arrayLen, n := binary.Uvarint(d.b[d.offset:])
+	arrayLen, n := binary.Uvarint(d.b[d.Offset:])
 	arrayLen--
-	d.offset += n
+	d.Offset += n
 	return arrayLen
 }
 
 func (d *Decoder) EndStruct() {
 	//  end of empty tagged fields KIP-482
-	d.offset++
+	d.Offset++
 }
