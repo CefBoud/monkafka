@@ -1,42 +1,4 @@
-package types
-
-// Protocol specific types
-
-type RecordBatch struct {
-	BaseOffset           uint64
-	BatchLength          uint32
-	PartitionLeaderEpoch uint32
-	Magic                uint8
-	CRC                  uint32
-	Attributes           uint16
-	LastOffsetDelta      uint32 // delta added to BaseOffset to get the Batch's last offset
-	BaseTimestamp        uint64
-	MaxTimestamp         uint64
-	ProducerId           uint64
-	ProducerEpoch        uint16
-	BaseSequence         uint32
-	Records              []byte //[]Record
-}
-
-//	type Record struct {
-//		Length         int // varint (usually int32 or int64 depending on the actual size)
-//		Attributes     int8
-//		TimestampDelta int64 // varlong: delta added the batch's BaseTimestamp
-//		OffsetDelta    int   // varint: delta added to the batch's BaseOffset
-//		KeyLength      int   // varint
-//		Key            []byte
-//		ValueLen       int // varint
-//		Value          []byte
-//		Headers        []Header
-//	}
-//
-//	type Header struct {
-//		HeaderKeyLength   int
-//		HeaderKey         string
-//		HeaderValueLength int
-//		Value             []byte
-//	}
-var MINUS_ONE int = -1
+package protocol
 
 // Responses
 type APIKey struct {

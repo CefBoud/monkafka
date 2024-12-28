@@ -17,6 +17,7 @@ import (
 
 func LoadTopicsState() (types.TopicsState, error) {
 	logDir := state.Config.LogDir
+	log.Printf("Starting with LogDir: %v\n", logDir)
 	err := os.MkdirAll(logDir, 0750)
 	if err != nil {
 		return state.TopicStateInstance, err
@@ -41,73 +42,17 @@ func LoadTopicsState() (types.TopicsState, error) {
 				state.TopicStateInstance[types.TopicName(topicName)] = make(map[types.PartitionIndex]*types.Partition)
 			}
 
-			indexFile, err := os.OpenFile(getIndexFile(topicName, uint32(index)), os.O_RDWR|os.O_CREATE, 0644) // os.Open(getIndexFile(topicName, uint32(index)))
+			segments, err := LoadSegments(filepath.Join(logDir, entry.Name()))
+			log.Printf("loaded %v segments for %v\n", len(segments), entry.Name())
 			if err != nil {
-				log.Println("Error opening index file:", err)
-				return state.TopicStateInstance, err
+				return nil, fmt.Errorf("failed to load segments from %v. %v", filepath.Join(logDir, entry.Name()), err)
 			}
-
-			indexData, err := io.ReadAll(indexFile)
-			if err != nil {
-				return nil, err
-			}
-
-			segmentFile, err := os.OpenFile(getSegmentFile(topicName, uint32(index)), os.O_RDWR|os.O_CREATE, 0644)
-			if err != nil {
-				log.Println("Error opening segment file:", err)
-				return state.TopicStateInstance, err
-			}
-
-			stat, err := segmentFile.Stat()
-			if err != nil {
-				log.Println("Error reading segment file info:", err)
-				return state.TopicStateInstance, err
-			}
-			segmentFileSize := uint32(stat.Size())
-
-			state.TopicStateInstance[types.TopicName(topicName)][types.PartitionIndex(index)] = &types.Partition{SegmentFile: segmentFile, IndexFile: indexFile, IndexData: indexData, NextRecordPosition: segmentFileSize}
-
-			offset, err := getLastOffset(topicName, uint32(index))
-			if err != nil {
-				log.Println("Error while getting last offset:", err)
-				return state.TopicStateInstance, err
-			}
-			state.TopicStateInstance[types.TopicName(topicName)][types.PartitionIndex(index)].LastOffset = offset
-
+			state.TopicStateInstance[types.TopicName(topicName)][types.PartitionIndex(index)] = &types.Partition{Segments: segments, Index: uint32(index), TopicName: topicName}
 		}
 	}
 	log.Println("loadTopicsState", state.TopicStateInstance)
 	return state.TopicStateInstance, err
 
-}
-
-// for now, we only use one segment with a uint32 offset
-// returns the partition's last message offset or -1 if it is empty
-func getLastOffset(topic string, partition uint32) (uint32, error) {
-	partitionState := state.GetPartition(topic, partition)
-	partitionState.RLock()
-	defer partitionState.RUnlock()
-	a := -1
-	MINUS_ONE := uint32(a)
-	indexSize := len(partitionState.IndexData)
-	if indexSize == 0 { // empty partition => -1 (current is -1, next is 0)
-		return MINUS_ONE, nil
-	}
-	// read the last byte which has the last offset
-	var lastOffset uint32 = MINUS_ONE
-	if indexSize >= 8 {
-		lastRecordOffset := serde.Encoding.Uint32(partitionState.IndexData[indexSize-8:])
-		recordPosition := serde.Encoding.Uint32(partitionState.IndexData[indexSize-4:])
-		// fmt.Printf(" recordPosition %v partitionState%+v ", recordPosition, partitionState)
-		recordBatchHeader := make([]byte, 31) // 31 is enough to get lastOffsetDelta
-		_, err := partitionState.SegmentFile.ReadAt(recordBatchHeader, int64(recordPosition))
-		if err != nil {
-			return 0, fmt.Errorf("getLastOffset: error while partitionState.SegmentFile.ReadAt %v ", err)
-		}
-		lastOffset = lastRecordOffset + lastOffsetDelta(recordBatchHeader)
-
-	}
-	return lastOffset, nil
 }
 
 func ParseRecord(b []byte) types.RecordBatch {
@@ -129,22 +74,21 @@ func ParseRecord(b []byte) types.RecordBatch {
 	// recordBatch.Records              []byte //[]Record
 	return recordBatch
 }
-func lastOffsetDelta(recordBatch []byte) uint32 {
-	decoder := serde.NewDecoder(recordBatch)
-	// len of the RecordBatch is a varint
-	decoder.Uvarint()
-	decoder.Offset += 8 + 4 + 4 + 1 + 4 + 2 // baseOffset + batchLength 4+ partitionLeaderEpoch 4 + magic 1 + crc 4 + attributes 2
-	return decoder.UInt32()
-}
 
 func AppendRecord(topic string, partition uint32, recordBytes []byte) error {
 	partitionState := state.GetPartition(topic, partition)
 	partitionState.Lock()
 	defer partitionState.Unlock()
+	activeSegment := partitionState.ActiveSegment()
+
 	// we append to the end
-	partitionState.SegmentFile.Seek(0, io.SeekEnd)
-	partitionState.IndexFile.Seek(0, io.SeekEnd)
-	newOffset := partitionState.LastOffset + 1
+	activeSegment.LogFile.Seek(0, io.SeekEnd)
+	activeSegment.IndexFile.Seek(0, io.SeekEnd)
+
+	var newOffset = activeSegment.EndOffset
+	if activeSegment.EndOffset > activeSegment.StartOffset { // true if segment is non empty
+		newOffset = activeSegment.EndOffset + 1
+	}
 
 	decoder := serde.NewDecoder(recordBytes)
 	// len of bytes
@@ -152,25 +96,27 @@ func AppendRecord(topic string, partition uint32, recordBytes []byte) error {
 	// set the RecordBatch's base offset
 	serde.Encoding.PutUint64(recordBytes[n:], uint64(newOffset))
 
-	n, err := partitionState.SegmentFile.Write(recordBytes)
+	n, err := activeSegment.LogFile.Write(recordBytes)
 	if n != len(recordBytes) || err != nil {
-		log.Printf("Error while appending record to segmentFile for topic %v\n", topic)
+		log.Printf("Error while appending record to LogFile for topic %v\n", topic)
 	}
 
 	indexEntry := make([]byte, 8)
-	serde.Encoding.PutUint32(indexEntry, newOffset)
-	serde.Encoding.PutUint32(indexEntry[4:], partitionState.NextRecordPosition)
+	serde.Encoding.PutUint32(indexEntry, uint32(newOffset-activeSegment.StartOffset)) // relative to start
+	serde.Encoding.PutUint32(indexEntry[4:], activeSegment.LogFileSize)
 	// log.Println("indexEntry", indexEntry)
-	partitionState.IndexFile.Write(indexEntry)
+	activeSegment.IndexFile.Write(indexEntry)
 
-	newIndexData := make([]byte, len(partitionState.IndexData)+8)
-	copy(newIndexData, partitionState.IndexData)
-	copy(newIndexData[len(partitionState.IndexData):], indexEntry)
-	partitionState.IndexData = newIndexData
-	partitionState.LastOffset = newOffset + lastOffsetDelta(recordBytes) // the new record batch offset + nb of records in batch
-	partitionState.NextRecordPosition += uint32(len(recordBytes))
-	log.Printf(" newOffset: %v | NextRecordPosition: %v \n ", newOffset, partitionState.NextRecordPosition)
-	// log.Println("partitionState.LastOffset after", partitionState.LastOffset, lastOffset, state.GetPartition(topic, partition).LastOffset)
+	newIndexData := make([]byte, len(activeSegment.IndexData)+8)
+	copy(newIndexData, activeSegment.IndexData)
+	copy(newIndexData[len(activeSegment.IndexData):], indexEntry)
+	activeSegment.IndexData = newIndexData
+	recordBatch := ParseRecord(recordBytes)
+	activeSegment.EndOffset = newOffset + uint64(recordBatch.LastOffsetDelta) // the new record batch offset + nb of records in batch
+	activeSegment.LogFileSize += uint32(len(recordBytes))
+	activeSegment.MaxTimestamp = recordBatch.MaxTimestamp
+	log.Printf(" newOffset: %v | NextRecordPosition: %v \n ", newOffset, activeSegment.LogFileSize)
+	// log.Println("partitionState.EndOffset after", partitionState.EndOffset, lastOffset, state.GetPartition(topic, partition).EndOffset)
 	return nil
 }
 
@@ -196,22 +142,59 @@ func getClosestIndexEntryIndex(offset uint32, indexData []byte) int {
 	// exact offset was not found, we return the closest greater one
 	return left
 }
-func GetRecord(offset uint32, topic string, partition uint32) ([]byte, error) {
-	// log.Printf("GetRecord offset: %v | topic: %v \n\n", offset, topic)
+
+func getOffsetSegment(offset uint64, partition *types.Partition) (*types.Segment, error) {
+	if offset < partition.StartOffset() || offset > partition.EndOffset()+1 {
+		return nil, fmt.Errorf("out of range of offset")
+	}
+	if offset == partition.EndOffset()+1 { // consumer caught up
+		if partition.ActiveSegment().LogFileSize > 0 {
+			return partition.ActiveSegment(), nil
+		} else {
+			// last segment is empty
+			segmentBeforeActive := partition.Segments[len(partition.Segments)-2]
+			return segmentBeforeActive, nil
+		}
+	}
+
+	for i, segment := range partition.Segments {
+		if offset >= segment.StartOffset && offset <= segment.EndOffset {
+			log.Printf("offset %v is within the %v segment bounds [ %v, %v ]", offset, i, segment.StartOffset, segment.EndOffset)
+			return segment, nil
+		}
+	}
+	log.Panicf("mismatch between segments and partition offsets")
+	return nil, nil
+}
+
+func GetRecord(offset uint64, topic string, partition uint32) ([]byte, error) {
+	log.Printf("GetRecord offset: %v | topic: %v \n\n", offset, topic)
 	partitionState := state.GetPartition(topic, partition)
 	partitionState.RLock()
 	defer partitionState.RUnlock()
-	indexData := partitionState.IndexData
+
+	if partitionState.IsEmpty() {
+		return nil, nil
+	}
+	targetSegment, err := getOffsetSegment(offset, partitionState) // partitionState.targetSegment()
+	if err != nil {
+		return nil, fmt.Errorf("error while getting offset segment: %v", err)
+	}
+	targetSegment.RLock()
+	defer targetSegment.RUnlock()
+
+	indexData := targetSegment.IndexData
 	var recordStartPosition, recordEndPosition uint32
 	// if offset is greater than latest offset, default to latest record
-	if len(indexData)/8 > 0 && offset > partitionState.LastOffset {
+	if len(indexData)/8 > 0 && offset > targetSegment.EndOffset {
 		recordStartPosition = serde.Encoding.Uint32(indexData[len(indexData)-4:])
-		recordEndPosition = partitionState.NextRecordPosition - 1
+		recordEndPosition = targetSegment.LogFileSize - 1
 		// since there are no records we wait a bit to slow down the consumer
 		time.Sleep(300 * time.Millisecond) // TODO get this from consumer settings
 	} else {
 
-		indexEntryIndex := getClosestIndexEntryIndex(offset, indexData)
+		indexEntryIndex := getClosestIndexEntryIndex(uint32(offset-targetSegment.StartOffset), indexData)
+		log.Printf("indexEntryIndex %v NbEntries %v", indexEntryIndex, len(indexData)/8)
 		recordStartPosition = serde.Encoding.Uint32(indexData[indexEntryIndex*8+4:])
 
 		if indexEntryIndex+1 < len(indexData)/8 {
@@ -219,16 +202,16 @@ func GetRecord(offset uint32, topic string, partition uint32) ([]byte, error) {
 			recordEndPosition = serde.Encoding.Uint32(indexData[(indexEntryIndex+1)*8+4:]) - 1
 		} else {
 			// this is the latest record. End pos is end of segment file
-			recordEndPosition = partitionState.NextRecordPosition - 1
+			recordEndPosition = targetSegment.LogFileSize - 1
 		}
 	}
-	_, err := partitionState.SegmentFile.Seek(int64(recordStartPosition), io.SeekStart)
+	_, err = targetSegment.LogFile.Seek(int64(recordStartPosition), io.SeekStart)
 	if err != nil {
 		return nil, err
 	}
 	nbRecordByte := recordEndPosition - recordStartPosition + 1
 	recordBytes := make([]byte, nbRecordByte)
-	n, err := partitionState.SegmentFile.Read(recordBytes)
+	n, err := targetSegment.LogFile.Read(recordBytes)
 	if n != int(nbRecordByte) || err != nil {
 		return nil, fmt.Errorf("error while reading record offset %v, expected %v bytes and read %v bytes. %v", offset, nbRecordByte, n, err)
 	}
@@ -241,26 +224,26 @@ func CreateTopic(name string, numPartitions uint32) error {
 	}
 
 	for i := 0; i < int(numPartitions); i++ {
-		err := os.MkdirAll(filepath.Dir(getIndexFile(name, uint32(i))), 0750)
+		err := os.MkdirAll(GetPartitionDir(name, uint32(i)), 0750)
 		if err != nil {
 			log.Println("Error creating topic directory:", err)
-		}
-		indexFile, err := os.OpenFile(getIndexFile(name, uint32(i)), os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			log.Println("Error creating index file:", err)
-			return err
-		}
-		segmentFile, err := os.OpenFile(getSegmentFile(name, uint32(i)), os.O_RDWR|os.O_CREATE, 0644)
-		if err != nil {
-			log.Println("Error creating segment file:", err)
-			return err
 		}
 		// update state
 		if i == 0 {
 			state.TopicStateInstance[types.TopicName(name)] = make(map[types.PartitionIndex]*types.Partition)
 		}
-		MINUS_ONE := -1
-		state.TopicStateInstance[types.TopicName(name)][types.PartitionIndex(i)] = &types.Partition{SegmentFile: segmentFile, IndexFile: indexFile, LastOffset: uint32(MINUS_ONE)}
+		partition := &types.Partition{
+			TopicName: name,
+			Index:     uint32(i),
+		}
+		segment, err := NewSegment(partition)
+		if err != nil {
+			log.Println("Error creating segment:", err)
+			return err
+		}
+		partition.Segments = []*types.Segment{segment}
+		state.TopicStateInstance[types.TopicName(name)][types.PartitionIndex(i)] = partition
+
 	}
 	log.Println("Created topic within ", name)
 	return nil
@@ -270,23 +253,14 @@ func GetPartitionDir(topic string, partition uint32) string {
 	return filepath.Join(state.Config.LogDir, topic+"-"+strconv.Itoa(int(partition)))
 }
 
-var FIRST_SEGMENT_FILE = "00000000000000000000"
-
-func getSegmentFile(topic string, partition uint32) string {
-	return filepath.Join(GetPartitionDir(topic, partition), FIRST_SEGMENT_FILE+".log")
-}
-func getIndexFile(topic string, partition uint32) string {
-	return filepath.Join(GetPartitionDir(topic, partition), FIRST_SEGMENT_FILE+".index")
-}
-
 // TODO: fsync this periodically
 func SyncPartition(partition *types.Partition) error {
-	err := partition.SegmentFile.Sync()
+	err := partition.ActiveSegment().LogFile.Sync()
 	if err != nil {
 		log.Println("Error syncing SegmentFile:", err)
 		return err
 	}
-	err = partition.IndexFile.Sync()
+	err = partition.ActiveSegment().IndexFile.Sync()
 	if err != nil {
 		log.Println("Error syncing IndexFile:", err)
 		return err
@@ -323,6 +297,19 @@ func Startup(Config types.Configuration, shutdown chan bool) {
 			}
 		}
 	}()
+
+	go func() {
+		ticker := time.NewTicker(time.Duration(Config.LogRetentionCheckIntervalMs) * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				CleanupSegments()
+			case <-shutdown:
+				return
+			}
+		}
+	}()
 }
 
 func GracefulShutdown() {
@@ -330,11 +317,11 @@ func GracefulShutdown() {
 	FlushDataToDisk()
 	for _, partitionMap := range state.TopicStateInstance {
 		for _, partition := range partitionMap {
-			err := partition.SegmentFile.Close()
+			err := partition.ActiveSegment().LogFile.Close()
 			if err != nil {
 				log.Println("Error syncing SegmentFile:", err)
 			}
-			partition.IndexFile.Close()
+			partition.ActiveSegment().IndexFile.Close()
 			if err != nil {
 				log.Println("Error syncing IndexFile:", err)
 			}

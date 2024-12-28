@@ -17,10 +17,15 @@ import (
 )
 
 var Config = types.Configuration{
-	LogDir:          filepath.Join(os.TempDir(), "MonKafka"),
-	BrokerHost:      "localhost",
-	BrokerPort:      9092,
-	FlushIntervalMs: 5000,
+	LogDir:                      filepath.Join(os.TempDir(), "MonKafka"),
+	BrokerHost:                  "localhost",
+	BrokerPort:                  9092,
+	FlushIntervalMs:             5000,
+	LogRetentionCheckIntervalMs: 1000 * 10,        // 10 sec  //5 * 60 * 1000, // 5 min
+	LogRetentionMs:              60 * 60 * 1000,   // 1h //604800000 (7 days)
+	LogSegmentSizeBytes:         1000 * 1000 * 10, // 10M bytes //104857600, // 100 MiB
+	LogSegmentMs:                1800000,          // 30 min
+
 }
 
 func handleConnection(conn net.Conn) {
@@ -34,7 +39,7 @@ func handleConnection(conn net.Conn) {
 		lengthBuffer := make([]byte, 4)
 		_, err := io.ReadFull(conn, lengthBuffer)
 		if err != nil {
-			log.Print("failed to read request length. Error: ", err)
+			log.Print("failed to read request's length. Error: ", err)
 			return
 		}
 		length := serde.Encoding.Uint32(lengthBuffer)

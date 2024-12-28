@@ -19,9 +19,9 @@ const DEFAULT_NUM_PARTITION = 1
 
 // APIVersion (Api key = 18)
 func getAPIVersionResponse(req types.Request) []byte {
-	APIVersions := types.APIVersionsResponse{
+	APIVersions := APIVersionsResponse{
 		ErrorCode: 0,
-		ApiKeys: []types.APIKey{
+		ApiKeys: []APIKey{
 			{ApiKey: ProduceKey, MinVersion: 0, MaxVersion: 11},
 			{ApiKey: FetchKey, MinVersion: 12, MaxVersion: 12},
 			{ApiKey: MetadataKey, MinVersion: 0, MaxVersion: 12},
@@ -59,7 +59,7 @@ func getMetadataResponse(req types.Request) []byte {
 	// TODO: we are only handling empty and non empty array case, null array (all topics) is not handled
 	nbTopics := decoder.CompactArrayLen()
 
-	topics := make([]types.MetadataResponseTopic, nbTopics)
+	topics := make([]MetadataResponseTopic, nbTopics)
 	topicNameToUUID := make(map[string][16]byte)
 	if nbTopics > 0 {
 		for i := 0; i < int(nbTopics); i++ {
@@ -85,7 +85,7 @@ func getMetadataResponse(req types.Request) []byte {
 	}
 	for name, uuid := range topicNameToUUID {
 		for partitionIndex := range state.TopicStateInstance[types.TopicName(name)] {
-			topics = append(topics, types.MetadataResponseTopic{Error_code: 0, Name: name, Topic_id: uuid, Is_internal: false, Partitions: []types.MetadataResponsePartition{{
+			topics = append(topics, MetadataResponseTopic{Error_code: 0, Name: name, Topic_id: uuid, Is_internal: false, Partitions: []MetadataResponsePartition{{
 				Error_code:      0,
 				Partition_index: uint32(partitionIndex),
 				Leader_id:       1,
@@ -95,9 +95,9 @@ func getMetadataResponse(req types.Request) []byte {
 		}
 	}
 
-	response := types.MetadataResponse{
+	response := MetadataResponse{
 		Throttle_time_ms: 0,
-		Brokers: []types.MetadataResponseBroker{
+		Brokers: []MetadataResponseBroker{
 			{
 				Node_id: 1,
 				Host:    state.Config.BrokerHost,
@@ -174,13 +174,13 @@ func getCreateTopicResponse(req types.Request) []byte {
 	if int32(numPartitions) == -1 {
 		numPartitions = DEFAULT_NUM_PARTITION
 	}
-	response := types.CreateTopicsResponse{
-		Topics: []types.CreateTopicsResponseTopic{{Name: topicName, TopicID: [16]byte{},
+	response := CreateTopicsResponse{
+		Topics: []CreateTopicsResponseTopic{{Name: topicName, TopicID: [16]byte{},
 			ErrorCode:         0,
 			ErrorMessage:      "",
 			NumPartitions:     numPartitions,
 			ReplicationFactor: 1,
-			Configs:           []types.CreateTopicsResponseConfig{},
+			Configs:           []CreateTopicsResponseConfig{},
 		}}}
 	encoder := serde.NewEncoder()
 	encoder.PutInt32(req.CorrelationID)
@@ -222,7 +222,7 @@ func getInitProducerIdResponse(req types.Request) []byte {
 		epochId = 1 // TODO: set this value properly
 	}
 
-	response := types.InitProducerIdResponse{
+	response := InitProducerIdResponse{
 		Producer_id:    producerId,
 		Producer_epoch: epochId,
 	}
@@ -237,8 +237,8 @@ func getInitProducerIdResponse(req types.Request) []byte {
 }
 
 // Producer (Api key = 0)
-func ReadTopicData(producerRequest []byte) []types.ProduceResponseTopicData {
-	var topic_data []types.ProduceResponseTopicData
+func ReadTopicData(producerRequest []byte) []ProduceResponseTopicData {
+	var topic_data []ProduceResponseTopicData
 
 	decoder := serde.NewDecoder(producerRequest)
 	decoder.Offset += 1 + 2 + 4 // no transactional_id + acks +timeout_ms
@@ -246,19 +246,19 @@ func ReadTopicData(producerRequest []byte) []types.ProduceResponseTopicData {
 	for i := 0; i < int(nbTopics); i++ {
 		topicName := decoder.String()
 		nbPartitions := decoder.CompactArrayLen()
-		var partition_data []types.ProduceResponsePartitionData
+		var partition_data []ProduceResponsePartitionData
 		for j := 0; j < int(nbPartitions); j++ {
 			index := decoder.UInt32()
 			data := decoder.BytesWithLen()
-			partition_data = append(partition_data, types.ProduceResponsePartitionData{Index: index, RecordsData: data})
+			partition_data = append(partition_data, ProduceResponsePartitionData{Index: index, RecordsData: data})
 			decoder.EndStruct()
 		}
-		topic_data = append(topic_data, types.ProduceResponseTopicData{Name: topicName, Partition_data: partition_data})
+		topic_data = append(topic_data, ProduceResponseTopicData{Name: topicName, Partition_data: partition_data})
 	}
 	return topic_data
 }
 
-func writeProducedRecords(topic_data []types.ProduceResponseTopicData) error {
+func writeProducedRecords(topic_data []ProduceResponseTopicData) error {
 	for _, td := range topic_data {
 		for _, pd := range td.Partition_data {
 			partitionDir := storage.GetPartitionDir(td.Name, pd.Index)
@@ -286,16 +286,16 @@ func getProduceResponse(req types.Request) []byte {
 		log.Println("Error opening partition file:", err)
 		os.Exit(1)
 	}
-	response := types.ProduceResponse{}
+	response := ProduceResponse{}
 
 	encoder := serde.NewEncoder()
 	encoder.PutInt32(req.CorrelationID)
 	encoder.EndStruct() // end header
 
 	for _, td := range topic_data {
-		produceTopicResponse := types.ProduceTopicResponse{Name: td.Name}
+		produceTopicResponse := ProduceTopicResponse{Name: td.Name}
 		for _, pd := range td.Partition_data {
-			produceTopicResponse.ProducePartitionResponses = append(produceTopicResponse.ProducePartitionResponses, types.ProducePartitionResponse{Index: pd.Index, LogAppendTimeMs: utils.NowAsUnixMilli(),
+			produceTopicResponse.ProducePartitionResponses = append(produceTopicResponse.ProducePartitionResponses, ProducePartitionResponse{Index: pd.Index, LogAppendTimeMs: utils.NowAsUnixMilli(),
 				BaseOffset: 0}) //State[td.name+string(pd.index)]
 		}
 		response.ProduceTopicResponses = append(response.ProduceTopicResponses, produceTopicResponse)
@@ -330,7 +330,7 @@ func getFindCoordinatorResponse(req types.Request) []byte {
 	encoder.EndStruct() // end header
 	encoder.PutInt32(0) // throttle_time_ms
 	// TODO: populate this properly
-	coordinators := []types.FindCoordinatorResponseCoordinator{{
+	coordinators := []FindCoordinatorResponseCoordinator{{
 		Key:    "dummy", //"console-consumer-22229",
 		NodeID: 1,
 		Host:   state.Config.BrokerHost,
@@ -365,14 +365,14 @@ func getJoinGroupResponse(req types.Request) []byte {
 
 	log.Printf("getJoinGroupResponse: groupId: %v, groupInstanceId:%v, protcolType: %v, protocolName:%v, metadataBytes: %v", groupId, groupInstanceId, protocolType, protocolName, metadataBytes)
 
-	response := types.JoinGroupResponse{
+	response := JoinGroupResponse{
 		GenerationID:   1,
 		ProtocolType:   "consumer",
 		ProtocolName:   "range",
 		Leader:         memberId,
 		SkipAssignment: false, // KIP-814 static membership (when false, the consumer group leader will send the assignments)
 		MemberID:       memberId,
-		Members: []types.JoinGroupResponseMember{
+		Members: []JoinGroupResponseMember{
 			{MemberID: memberId,
 				Metadata: metadataBytes[0]},
 		},
@@ -464,13 +464,13 @@ func getOffsetFetchResponse(req types.Request) []byte {
 		decoder.EndStruct()
 	}
 	// log.Println("topic_partitions", topic_partitions)
-	response := types.OffsetFetchResponse{Groups: []types.OffsetFetchGroup{
-		{GroupID: groupId, Topics: []types.OffsetFetchTopic{}},
+	response := OffsetFetchResponse{Groups: []OffsetFetchGroup{
+		{GroupID: groupId, Topics: []OffsetFetchTopic{}},
 	}}
 	for tp, partitions := range topic_partitions {
-		offsetFetchTopic := types.OffsetFetchTopic{Name: tp}
+		offsetFetchTopic := OffsetFetchTopic{Name: tp}
 		for _, p := range partitions {
-			offsetFetchTopic.Partitions = append(offsetFetchTopic.Partitions, types.OffsetFetchPartition{PartitionIndex: p})
+			offsetFetchTopic.Partitions = append(offsetFetchTopic.Partitions, OffsetFetchPartition{PartitionIndex: p})
 		}
 		response.Groups[0].Topics = append(response.Groups[0].Topics, offsetFetchTopic)
 	}
@@ -527,17 +527,17 @@ func getFetchResponse(req types.Request) []byte {
 		decoder.EndStruct()
 	}
 	numTotalRecordBytes := 0
-	response := types.FetchResponse{}
+	response := FetchResponse{}
 	for tp, partitions := range topic_partitions {
-		fetchTopicResponse := types.FetchTopicResponse{TopicName: tp}
+		fetchTopicResponse := FetchTopicResponse{TopicName: tp}
 		for _, p := range partitions {
-			recordBytes, err := storage.GetRecord(uint32(p.fetchOffset), tp, p.index)
+			recordBytes, err := storage.GetRecord(p.fetchOffset, tp, p.index)
 			numTotalRecordBytes += len(recordBytes)
 			if err != nil {
 				log.Printf("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.fetchOffset), tp, p.index, err)
 			}
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
-				types.FetchPartitionResponse{
+				FetchPartitionResponse{
 					PartitionIndex:       p.index,
 					HighWatermark:        uint64(MINUS_ONE), //uint64(MINUS_ONE),
 					LastStableOffset:     uint64(MINUS_ONE),
