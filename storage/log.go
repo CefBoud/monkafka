@@ -157,9 +157,9 @@ func getOffsetSegment(offset uint64, partition *types.Partition) (*types.Segment
 		}
 	}
 
-	for i, segment := range partition.Segments {
+	for _, segment := range partition.Segments {
 		if offset >= segment.StartOffset && offset <= segment.EndOffset {
-			log.Printf("offset %v is within the %v segment bounds [ %v, %v ]", offset, i, segment.StartOffset, segment.EndOffset)
+			// log.Printf("offset %v is within the %v segment bounds [ %v, %v ]", offset, i, segment.StartOffset, segment.EndOffset)
 			return segment, nil
 		}
 	}
@@ -194,7 +194,8 @@ func GetRecord(offset uint64, topic string, partition uint32) ([]byte, error) {
 	} else {
 
 		indexEntryIndex := getClosestIndexEntryIndex(uint32(offset-targetSegment.StartOffset), indexData)
-		log.Printf("indexEntryIndex %v NbEntries %v", indexEntryIndex, len(indexData)/8)
+
+		// log.Printf("indexEntryIndex %v NbEntries %v", indexEntryIndex, len(indexData)/8)
 		recordStartPosition = serde.Encoding.Uint32(indexData[indexEntryIndex*8+4:])
 
 		if indexEntryIndex+1 < len(indexData)/8 {
@@ -286,34 +287,32 @@ func Startup(Config types.Configuration, shutdown chan bool) {
 		os.Exit(1)
 	}
 	go func() {
-		ticker := time.NewTicker(time.Duration(Config.FlushIntervalMs) * time.Millisecond)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				FlushDataToDisk()
-			case <-shutdown:
-				return
-			}
-		}
-	}()
+		flushTicker := time.NewTicker(time.Duration(Config.FlushIntervalMs) * time.Millisecond)
+		CleanupTicker := time.NewTicker(time.Duration(Config.LogRetentionCheckIntervalMs) * time.Millisecond)
 
-	go func() {
-		ticker := time.NewTicker(time.Duration(Config.LogRetentionCheckIntervalMs) * time.Millisecond)
-		defer ticker.Stop()
+		defer flushTicker.Stop()
+		defer CleanupTicker.Stop()
 		for {
+
 			select {
-			case <-ticker.C:
+			case <-flushTicker.C:
+				FlushDataToDisk()
+			case <-CleanupTicker.C:
 				CleanupSegments()
-			case <-shutdown:
-				return
+			case _, open := <-shutdown:
+				if !open {
+					log.Println("Stopping log management goroutines")
+					return
+				}
+
 			}
 		}
 	}()
 }
 
-func GracefulShutdown() {
-	// flush data to disk
+func Shutdown() {
+	log.Println("Storage Shutdown...")
+
 	FlushDataToDisk()
 	for _, partitionMap := range state.TopicStateInstance {
 		for _, partition := range partitionMap {

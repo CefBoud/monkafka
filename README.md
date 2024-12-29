@@ -5,7 +5,7 @@ In its current state, the code handles topic creation, produce and consume reque
 
 I am also writing a [blog post](https://cefboud.github.io/posts/monkafka) to share some of my learnings along the way.
 
-# Testing
+# Getting Started
 I am running `go1.23.4` for my local testing.
 
 1. Start the server locally on port 9092:
@@ -73,6 +73,15 @@ I am running `go1.23.4` for my local testing.
 
     ```
 
+# Running tests
+Simple end-to-end tests have been implemented to verify topic creation and basic producer and consumer functionality.
+
+The tests assume Kafka is installed. The Kafka bin directory can be specified using the environment variable `KAFKA_BIN_DIR`; otherwise, it defaults to `$HOME/kafka_2.13-3.9.0/bin`.
+
+```
+export KAFKA_BIN_DIR=/tmp/kafka_2.13-3.9.0/bin
+go test -v  ./...
+```
 
 # TODO
 - [X] Basic Topic Creation, Produce and Fetch.

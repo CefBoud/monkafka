@@ -263,7 +263,7 @@ func writeProducedRecords(topic_data []ProduceResponseTopicData) error {
 		for _, pd := range td.Partition_data {
 			partitionDir := storage.GetPartitionDir(td.Name, pd.Index)
 			err := os.MkdirAll(partitionDir, 0750)
-			log.Println("Writing within partition dir ", partitionDir)
+			// log.Println("Writing within partition dir ", partitionDir)
 			if err != nil {
 				log.Println("Error creating topic directory:", err)
 				return err
