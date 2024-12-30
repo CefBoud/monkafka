@@ -1,6 +1,7 @@
 package types
 
 import (
+	"fmt"
 	"os"
 	"sync"
 )
@@ -40,6 +41,9 @@ type Partition struct {
 	sync.RWMutex
 }
 
+func (p *Partition) String() string {
+	return fmt.Sprintf("%v-%v", p.TopicName, p.Index)
+}
 func (p *Partition) ActiveSegment() *Segment {
 	return p.Segments[len(p.Segments)-1]
 }

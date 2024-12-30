@@ -3,9 +3,10 @@ package broker
 import (
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"os"
+
+	log "github.com/CefBoud/monkafka/logging"
 
 	"github.com/CefBoud/monkafka/protocol"
 	"github.com/CefBoud/monkafka/serde"
@@ -28,17 +29,17 @@ func (b Broker) Startup() {
 	// Set up a TCP listener on port 9092
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Config.BrokerPort))
 	if err != nil {
-		log.Printf("Error starting server: %v\n", err)
+		log.Error("Error starting server: %v\n", err)
 		os.Exit(1)
 	}
 	defer listener.Close()
 
-	log.Printf("Server is listening on port %d...\n", b.Config.BrokerPort)
+	log.Info("Server is listening on port %d...\n", b.Config.BrokerPort)
 
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			log.Printf("Error accepting connection: %v\n", err)
+			log.Error("Error accepting connection: %v\n", err)
 			continue
 		}
 		go b.HandleConnection(conn)
@@ -48,7 +49,7 @@ func (b Broker) Startup() {
 func (b Broker) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	connectionAddr := conn.RemoteAddr().String()
-	log.Printf("Connection established with %s\n", connectionAddr)
+	log.Debug("Connection established with %s\n", connectionAddr)
 
 	for {
 		// First, we read the length, then allocate a byte slice based on it.
@@ -56,7 +57,7 @@ func (b Broker) HandleConnection(conn net.Conn) {
 		lengthBuffer := make([]byte, 4)
 		_, err := io.ReadFull(conn, lengthBuffer)
 		if err != nil {
-			log.Print("failed to read request's length. Error: ", err)
+			log.Error("failed to read request's length. Error: ", err)
 			return
 		}
 		length := serde.Encoding.Uint32(lengthBuffer)
@@ -65,26 +66,26 @@ func (b Broker) HandleConnection(conn net.Conn) {
 		_, err = io.ReadFull(conn, buffer[4:])
 		if err != nil {
 			if err.Error() != "EOF" {
-				log.Printf("Error reading from connection: %v\n", err)
+				log.Error("Error reading from connection: %v\n", err)
 			}
 			break
 		}
 		req := serde.ParseHeader(buffer, connectionAddr)
 
-		// log.Printf("Received RequestApiKey: %v | RequestApiVersion: %v | CorrelationID: %v | Length: %v \n\n", protocol.APIDispatcher[req.RequestApiKey].Name, req.RequestApiVersion, req.CorrelationID, length)
+		log.Debug("Received RequestApiKey: %v | RequestApiVersion: %v | CorrelationID: %v | Length: %v \n\n", protocol.APIDispatcher[req.RequestApiKey].Name, req.RequestApiVersion, req.CorrelationID, length)
 		response := protocol.APIDispatcher[req.RequestApiKey].Handler(req)
 
 		_, err = conn.Write(response)
 		if err != nil {
-			log.Printf("Error writing to connection: %v\n", err)
+			log.Error("Error writing to connection: %v\n", err)
 			break
 		}
 	}
-	log.Printf("Connection with %s closed.\n", connectionAddr)
+	log.Debug("Connection with %s closed.\n", connectionAddr)
 }
 
 func (b Broker) Shutdown() {
-	log.Println("Broker Shutdown...")
+	log.Info("Broker Shutdown...")
 	close(b.ShutDownSignal)
 	storage.Shutdown()
 }

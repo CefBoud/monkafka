@@ -1,10 +1,10 @@
 package protocol
 
 import (
-	"log"
 	"os"
 	"time"
 
+	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/serde"
 	"github.com/CefBoud/monkafka/state"
 	"github.com/CefBoud/monkafka/storage"
@@ -72,13 +72,12 @@ func getMetadataResponse(req types.Request) []byte {
 
 	// Auto create topics if requested
 	allowAutoTopicCreation := decoder.Bool()
-	log.Println("allowAutoTopicCreation", allowAutoTopicCreation, topicNameToUUID)
 	for name := range topicNameToUUID {
 		if _, exists := state.TopicStateInstance[types.TopicName(name)]; !exists {
 			if allowAutoTopicCreation {
 				err := storage.CreateTopic(name, 1)
 				if err != nil {
-					log.Println("Error creating topic ", err)
+					log.Error("Error creating topic ", err)
 				}
 			}
 		}
@@ -203,7 +202,7 @@ func getCreateTopicResponse(req types.Request) []byte {
 
 	err := storage.CreateTopic(topicName, numPartitions)
 	if err != nil {
-		log.Println("Error creating topic ", err)
+		log.Error("Error creating topic ", err)
 	}
 	return encoder.FinishAndReturn()
 }
@@ -263,17 +262,16 @@ func writeProducedRecords(topic_data []ProduceResponseTopicData) error {
 		for _, pd := range td.Partition_data {
 			partitionDir := storage.GetPartitionDir(td.Name, pd.Index)
 			err := os.MkdirAll(partitionDir, 0750)
-			// log.Println("Writing within partition dir ", partitionDir)
+			log.Debug("Writing within partition dir ", partitionDir)
 			if err != nil {
-				log.Println("Error creating topic directory:", err)
+				log.Error("Error creating topic directory:", err)
 				return err
 			}
 			err = storage.AppendRecord(td.Name, pd.Index, pd.RecordsData)
 			if err != nil {
-				log.Println("Error AppendRecord:", err)
+				log.Error("Error AppendRecord:", err)
 				return err
 			}
-			// log.Printf("produce len(recordsByte) %+v  ParseRecord %+v \n\n", len(pd.RecordsData), storage.ParseRecord(pd.RecordsData))
 		}
 
 	}
@@ -283,7 +281,7 @@ func getProduceResponse(req types.Request) []byte {
 	topic_data := ReadTopicData(req.Body)
 	err := writeProducedRecords(topic_data)
 	if err != nil {
-		log.Println("Error opening partition file:", err)
+		log.Error("Error opening partition file:", err)
 		os.Exit(1)
 	}
 	response := ProduceResponse{}
@@ -363,7 +361,7 @@ func getJoinGroupResponse(req types.Request) []byte {
 		metadataBytes = append(metadataBytes, decoder.Bytes())
 	}
 
-	log.Printf("getJoinGroupResponse: groupId: %v, groupInstanceId:%v, protcolType: %v, protocolName:%v, metadataBytes: %v", groupId, groupInstanceId, protocolType, protocolName, metadataBytes)
+	log.Debug("getJoinGroupResponse: groupId: %v, groupInstanceId:%v, protcolType: %v, protocolName:%v, metadataBytes: %v", groupId, groupInstanceId, protocolType, protocolName, metadataBytes)
 
 	response := JoinGroupResponse{
 		GenerationID:   1,
@@ -427,7 +425,6 @@ func getSyncGroupResponse(req types.Request) []byte {
 		assignmentBytes[i] = decoder.Bytes()
 		decoder.EndStruct()
 	}
-	// log.Println("assignmentBytes", assignmentBytes)
 	encoder := serde.NewEncoder()
 	encoder.PutInt32(req.CorrelationID)
 	encoder.EndStruct() // end header
@@ -463,7 +460,6 @@ func getOffsetFetchResponse(req types.Request) []byte {
 		}
 		decoder.EndStruct()
 	}
-	// log.Println("topic_partitions", topic_partitions)
 	response := OffsetFetchResponse{Groups: []OffsetFetchGroup{
 		{GroupID: groupId, Topics: []OffsetFetchTopic{}},
 	}}
@@ -514,7 +510,6 @@ func getFetchResponse(req types.Request) []byte {
 	for i := uint64(0); i < nbTopics; i++ {
 
 		topicName := decoder.String()
-		// log.Println("topicName", topicName)
 		nbPartitions := decoder.CompactArrayLen()
 		for j := uint64(0); j < nbPartitions; j++ {
 			index := decoder.UInt32()
@@ -534,7 +529,7 @@ func getFetchResponse(req types.Request) []byte {
 			recordBytes, err := storage.GetRecord(p.fetchOffset, tp, p.index)
 			numTotalRecordBytes += len(recordBytes)
 			if err != nil {
-				log.Printf("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.fetchOffset), tp, p.index, err)
+				log.Error("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.fetchOffset), tp, p.index, err)
 			}
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
@@ -549,10 +544,9 @@ func getFetchResponse(req types.Request) []byte {
 		response.Responses = append(response.Responses, fetchTopicResponse)
 	}
 	if numTotalRecordBytes == 0 {
-		log.Println("There is no data available for this fetch request, waiting for a bit ..")
+		log.Info("There is no data available for this fetch request, waiting for a bit ..")
 		time.Sleep(300 * time.Millisecond) // TODO get this from consumer settings
 	}
-	// log.Println("FetchResponse", response)
 	encoder := serde.NewEncoder()
 	encoder.PutInt32(req.CorrelationID)
 	encoder.EndStruct() // end header

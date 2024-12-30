@@ -3,13 +3,14 @@ package storage
 import (
 	"fmt"
 	"io"
-	"log"
+
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/serde"
 	"github.com/CefBoud/monkafka/state"
 	"github.com/CefBoud/monkafka/types"
@@ -34,12 +35,12 @@ func NewSegment(p *types.Partition) (*types.Segment, error) {
 	}
 	indexFile, err := os.OpenFile(getIndexFile(p.TopicName, p.Index, segmentStartOffset), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Println("Error creating index file:", err)
+		log.Error("Error creating index file:", err)
 		return seg, err
 	}
 	logFile, err := os.OpenFile(getLogFile(p.TopicName, p.Index, segmentStartOffset), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Println("Error creating segment file:", err)
+		log.Error("Error creating segment file:", err)
 		return seg, err
 	}
 
@@ -103,7 +104,7 @@ func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 				endOffset += uint64(lastRecordOffset + lastRecordBatch.LastOffsetDelta)
 			}
 
-			log.Printf("loading segment  %v EndOffset %v indexData len %v\n ", indexFilePath, endOffset, len(indexData))
+			log.Info("loading segment  %v EndOffset %v indexData len %v\n ", indexFilePath, endOffset, len(indexData))
 			segments = append(segments, &types.Segment{
 				LogFile:      logFile,
 				IndexFile:    indexFile,
@@ -120,7 +121,6 @@ func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 
 func shouldRollSegment(segment *types.Segment) bool {
 	// roll if larger than LogSegmentSizeBytes or older than LogSegmentMs
-	// log.Printf("segment is %v hours old", (uint64(time.Now().UnixMilli())-state.Config.LogSegmentMs-segment.MaxTimestamp)/1000/60/60)
 	return segment.LogFileSize >= uint32(state.Config.LogSegmentSizeBytes) ||
 		(segment.MaxTimestamp > 0 && segment.MaxTimestamp < uint64(time.Now().UnixMilli())-state.Config.LogSegmentMs)
 }
@@ -148,7 +148,8 @@ func deleteOldestSegment(partition *types.Partition) error {
 	partition.Lock()
 	defer partition.Unlock()
 	if len(partition.Segments) < 2 {
-		log.Panicln("There is only one segment - the active one. Deletion is forbidden")
+		log.Error("There is only one segment - the active one. Deletion is forbidden")
+		os.Exit(1)
 	}
 	segment := partition.Segments[0]
 	segment.Lock()
@@ -166,13 +167,13 @@ func deleteOldestSegment(partition *types.Partition) error {
 	return nil
 }
 func CleanupSegments() error {
-	log.Println("Running CleanupSegments")
+	log.Info("Running CleanupSegments")
 	for _, partitionMap := range state.TopicStateInstance {
 		for _, partition := range partitionMap {
 			activeSegment := partition.ActiveSegment()
 
 			if shouldRollSegment(activeSegment) {
-				log.Printf("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
+				log.Info("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
 				err := rollPartitionSegment(partition)
 				if err != nil {
 					return fmt.Errorf("error while rolling partition %v-%v segment %v", partition.TopicName, partition.Index, err)
@@ -182,7 +183,7 @@ func CleanupSegments() error {
 			// all segments except the last/active one
 			for _, segment := range partition.Segments[:len(partition.Segments)-1] {
 				if shouldDeleteSegment(segment) {
-					log.Printf("deleting oldest segment for partition %v-%v \n", partition.TopicName, partition.Index)
+					log.Info("deleting oldest segment for partition %v-%v \n", partition.TopicName, partition.Index)
 					err := deleteOldestSegment(partition)
 					if err != nil {
 						return fmt.Errorf("error while deleting oldest segment for partition %v-%v Error: %v", partition.TopicName, partition.Index, err)

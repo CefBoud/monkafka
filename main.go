@@ -1,13 +1,13 @@
 package main
 
 import (
-	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"syscall"
 
 	"github.com/CefBoud/monkafka/broker"
+	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/types"
 )
 
@@ -27,11 +27,12 @@ func main() {
 	// TODO: config from args / env
 	broker := broker.NewBroker(Config)
 
+	log.SetLogLevel(log.INFO)
 	signalChannel := make(chan os.Signal, 1)
 	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		sig := <-signalChannel
-		log.Printf("\nReceived signal: %s. Shutting down...\n", sig)
+		log.Info("\nReceived signal: %s. Shutting down...\n", sig)
 		broker.Shutdown()
 		os.Exit(0)
 	}()
