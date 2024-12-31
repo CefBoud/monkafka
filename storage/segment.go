@@ -99,7 +99,7 @@ func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 				if err != nil {
 					return nil, fmt.Errorf("error while reading %v. %v ", logFilePath, err)
 				}
-				lastRecordBatch = ParseRecord(lastBatchRecordBytes)
+				lastRecordBatch = ReadRecordBatch(lastBatchRecordBytes)
 				// offset written in the index are relative to the start, hence endOffset += not endOffset =
 				endOffset += uint64(lastRecordOffset + lastRecordBatch.LastOffsetDelta)
 			}

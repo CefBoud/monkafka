@@ -189,3 +189,82 @@ type AbortedTransaction struct {
 	ProducerId  uint64
 	FirstOffset uint64
 }
+
+// ListOffsets
+
+type ListOffsetsRequest struct {
+	ReplicaID      uint32
+	IsolationLevel uint8
+	Topics         []ListOffsetsRequestTopic
+}
+
+type ListOffsetsRequestTopic struct {
+	Name       string
+	Partitions []ListOffsetsRequestPartition
+}
+
+type ListOffsetsRequestPartition struct {
+	PartitionIndex     uint32
+	CurrentLeaderEpoch uint32
+	Timestamp          uint64
+}
+
+var (
+	ListOffsetsEarliestTimestamp = -2
+	ListOffsetsLatestTimestamp   = -1
+	ListOffsetsMaxTimestamp      = -3
+)
+
+type ListOffsetsResponse struct {
+	ThrottleTimeMs uint32
+	Topics         []ListOffsetsResponseTopic
+}
+
+type ListOffsetsResponseTopic struct {
+	Name       string
+	Partitions []ListOffsetsResponsePartition
+}
+
+type ListOffsetsResponsePartition struct {
+	PartitionIndex uint32
+	ErrorCode      uint16
+	Timestamp      uint64
+	Offset         uint64
+	LeaderEpoch    uint32
+}
+
+// OffsetCommit
+type OffsetCommitRequest struct {
+	GroupID                   string
+	GenerationIDOrMemberEpoch uint32
+	MemberID                  string
+	GroupInstanceID           string
+	Topics                    []OffsetCommitRequestTopic
+}
+
+type OffsetCommitRequestTopic struct {
+	Name       string
+	Partitions []OffsetCommitRequestPartition
+}
+
+type OffsetCommitRequestPartition struct {
+	PartitionIndex       uint32
+	CommittedOffset      uint64
+	CommittedLeaderEpoch uint32
+	CommittedMetadata    string
+}
+
+type OffsetCommitResponse struct {
+	ThrottleTimeMs uint32
+	Topics         []OffsetCommitResponseTopic
+}
+
+type OffsetCommitResponseTopic struct {
+	Name       string
+	Partitions []OffsetCommitResponsePartition
+}
+
+type OffsetCommitResponsePartition struct {
+	PartitionIndex uint32
+	ErrorCode      uint16
+}

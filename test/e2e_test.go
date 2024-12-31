@@ -27,12 +27,12 @@ var TestConfig = types.Configuration{
 
 var BootstrapServers = fmt.Sprintf("%s:%d", TestConfig.BrokerHost, TestConfig.BrokerPort)
 var HomeDir, _ = os.UserHomeDir()
-var KafkaBinDir = HomeDir + "/kafka_2.13-3.9.0/bin" // assumes kafka is in HomeDir
+var KafkaBinDir = HomeDir + "/kafka_2.13-3.9.0/bin/" // assumes kafka is in HomeDir
 
 func TestMain(m *testing.M) {
 	// Initialization logic
 	log.Println("Setup: Initializing resources")
-
+	os.RemoveAll(TestConfig.LogDir)
 	v, exists := os.LookupEnv("KAFKA_BIN_DIR")
 	if exists {
 		KafkaBinDir = v
@@ -70,12 +70,12 @@ func TestTopicCreation(t *testing.T) {
 		t.Error(err.Error())
 	}
 	if !strings.Contains(string(output), fmt.Sprintf("Created topic %s.", topicName)) {
-		t.Errorf("Expected output to contain 'Created topic %s.'", topicName)
+		t.Errorf("Expected output to contain 'Created topic %s.'. Output: %v", topicName, string(output))
 	}
 }
 
 func TestProducerAndConsumer(t *testing.T) {
-	nbRecords := "100" // "100000"
+	nbRecords := "1000" // "100000"
 	topicName := "test-topic"
 	cmd := exec.Command(
 		filepath.Join(KafkaBinDir, "kafka-producer-perf-test.sh"),
@@ -85,7 +85,7 @@ func TestProducerAndConsumer(t *testing.T) {
 		"--throughput", "100000",
 		"--producer-props", "acks=1", "batch.size=16384", "linger.ms=5", fmt.Sprintf("bootstrap.servers=%s", BootstrapServers),
 	)
-	stdout, err := cmd.Output()
+	_, err := cmd.Output()
 
 	if err != nil {
 		t.Error(err.Error())
@@ -96,13 +96,116 @@ func TestProducerAndConsumer(t *testing.T) {
 		"--bootstrap-server", BootstrapServers,
 		"--topic", topicName,
 		"--max-messages", nbRecords,
+		"--from-beginning",
 	)
 	output, err := consumerCmd.CombinedOutput()
-	log.Println(string(stdout))
+
 	if err != nil {
 		t.Error(err.Error())
 	}
 	if !strings.Contains(string(output), fmt.Sprintf("Processed a total of %s messages", nbRecords)) {
-		t.Errorf("Expected consumer output to contain 'Processed a total of %s messages'", nbRecords)
+		t.Errorf("Expected consumer output to contain 'Processed a total of %s messages'. Output: %v", nbRecords, string(output))
+	}
+}
+
+func TestOffsetCommitLogFormat(t *testing.T) {
+	nbRecords := "100" // "100000"
+	topicName := "test-offset-commit-topic"
+	cmd := exec.Command(
+		filepath.Join(KafkaBinDir, "kafka-producer-perf-test.sh"),
+		"--topic", topicName,
+		"--num-records", nbRecords,
+		"--record-size", "500",
+		"--throughput", "100000",
+		"--producer-props", "acks=1", "batch.size=16384", "linger.ms=5", fmt.Sprintf("bootstrap.servers=%s", BootstrapServers),
+	)
+	_, err := cmd.Output()
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	consumerCmd := exec.Command(
+		filepath.Join(KafkaBinDir, "kafka-console-consumer.sh"),
+		"--bootstrap-server", BootstrapServers,
+		"--topic", topicName,
+		"--max-messages", nbRecords,
+		"--consumer-property", "enable.auto.commit=true",
+		"--from-beginning",
+	)
+	err = consumerCmd.Run()
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	// output has a | which confuses exec. We run the command using sh -c to address that
+	dumpLogCmd := exec.Command(
+		"sh", "-c", fmt.Sprintf(
+			"%s --offsets-decoder --files %s",
+			filepath.Join(KafkaBinDir, "kafka-dump-log.sh"),
+			filepath.Join(TestConfig.LogDir, "__consumer-offsets-0/00000000000000000000.log"),
+		),
+	)
+
+	output, err := dumpLogCmd.CombinedOutput()
+	if err != nil {
+		t.Error(err.Error())
+		return
+	}
+	if !strings.Contains(string(output), fmt.Sprintf("\"topic\":\"%v\"", topicName)) ||
+		!strings.Contains(string(output), fmt.Sprintf("\"offset\":%v", nbRecords)) {
+		t.Errorf("Expected kafka-dump-log output to contain topic %v and offset %v. Output: %v", topicName, nbRecords, string(output))
+	}
+}
+
+func TestGroupOffsetResume(t *testing.T) {
+	nbRecords := "100"
+
+	topicName := "test-group-offset-resume"
+	cmd := exec.Command(
+		filepath.Join(KafkaBinDir, "kafka-producer-perf-test.sh"),
+		"--topic", topicName,
+		"--num-records", nbRecords,
+		"--payload-monotonic", // payload will be 1,2 ...nbRecords
+		"--throughput", "100000",
+		"--producer-props", "acks=1", "batch.size=1", fmt.Sprintf("bootstrap.servers=%s", BootstrapServers), // batch.size=1 to have fine-grained consumption
+	)
+	_, err := cmd.Output()
+
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	// we consume nbConsumedRecords from beginning and commit offset
+	// next consumed message for the same group id should be "nbConsumedRecords" given we used --payload-monotonic
+	// with `kafka-producer-perf-test`
+	nbConsumedRecords := "33"
+	consumerCmd := exec.Command(
+		filepath.Join(KafkaBinDir, "kafka-console-consumer.sh"),
+		"--bootstrap-server", BootstrapServers,
+		"--topic", topicName,
+		"--max-messages", nbConsumedRecords,
+		"--consumer-property", "enable.auto.commit=true",
+		"--consumer-property", "group.id=test1",
+		"--from-beginning",
+	)
+	err = consumerCmd.Run()
+	if err != nil {
+		t.Error(err.Error())
+	}
+
+	consumerCmd = exec.Command(
+		filepath.Join(KafkaBinDir, "kafka-console-consumer.sh"),
+		"--bootstrap-server", BootstrapServers,
+		"--topic", topicName,
+		"--max-messages", "1",
+		"--consumer-property", "group.id=test1",
+	)
+	output, err := consumerCmd.CombinedOutput()
+	if err != nil {
+		t.Error(err.Error())
+		return
+	}
+	if !strings.Contains(string(output), nbConsumedRecords) {
+		t.Errorf("Expected kafka-console-consumer output to contain value '%v'. Output: %v", nbConsumedRecords, string(output))
 	}
 }

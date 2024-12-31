@@ -85,10 +85,10 @@ go test -v  ./...
 
 # TODO
 - [X] Basic Topic Creation, Produce and Fetch.
-- [ ] Multiple log segments per partition
+- [X] Multiple log segments per partition
+- [ ] Improve Consumer offsets management
 - [ ] Parse requests properly (so far, only necessary fields are parsed)
 - [ ] Configurability 
-- [ ] Consumer offsets topic
 - [ ] Better concurrency
 - [ ] Error handling (e.g. topic not found)
 - [ ] Honor more produce and consume options

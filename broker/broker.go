@@ -24,8 +24,9 @@ func NewBroker(config types.Configuration) *Broker {
 }
 
 func (b Broker) Startup() {
-	storage.Startup(b.Config, b.ShutDownSignal)
 
+	storage.Startup(b.Config, b.ShutDownSignal)
+	protocol.LoadGroupMetadataState()
 	// Set up a TCP listener on port 9092
 	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", b.Config.BrokerPort))
 	if err != nil {
@@ -57,7 +58,7 @@ func (b Broker) HandleConnection(conn net.Conn) {
 		lengthBuffer := make([]byte, 4)
 		_, err := io.ReadFull(conn, lengthBuffer)
 		if err != nil {
-			log.Error("failed to read request's length. Error: ", err)
+			log.Error("failed to read request's length. Error: %v ", err)
 			return
 		}
 		length := serde.Encoding.Uint32(lengthBuffer)

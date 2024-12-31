@@ -2,6 +2,7 @@ package serde
 
 import (
 	"encoding/binary"
+	"slices"
 
 	"github.com/CefBoud/monkafka/types"
 )
@@ -11,15 +12,13 @@ var Encoding = binary.BigEndian
 type Encoder struct {
 	b      []byte
 	offset int
-	page   int
 }
 
 // 64 KiB
 const BUFFER_INCREMENT = 16384 * 4
 
 func NewEncoder() Encoder {
-	// TODO handle byte slice limit
-	return Encoder{b: make([]byte, BUFFER_INCREMENT), offset: 4, page: 1} // start at 4 to leave space for length uint32
+	return Encoder{b: make([]byte, BUFFER_INCREMENT)}
 }
 
 func (e *Encoder) ensureBufferSpace(off int) {
@@ -44,6 +43,12 @@ func (e *Encoder) PutInt16(i uint16) {
 	Encoding.PutUint16(e.b[e.offset:], i)
 	e.offset += 2
 }
+func (e *Encoder) PutInt8(i uint8) {
+	e.ensureBufferSpace(1)
+	e.b[e.offset] = byte(i)
+	e.offset++
+}
+
 func (e *Encoder) PutBool(b bool) {
 	e.ensureBufferSpace(1)
 	e.b[e.offset] = byte(0)
@@ -52,14 +57,38 @@ func (e *Encoder) PutBool(b bool) {
 	}
 	e.offset++
 }
+
+func (e *Encoder) PutUvarint(l int) {
+	e.ensureBufferSpace(4 + l)
+	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(l))
+}
+func (e *Encoder) PutVarint(l int) {
+	e.ensureBufferSpace(4 + l)
+	e.offset += binary.PutVarint(e.b[e.offset:], int64(l))
+}
+
 func (e *Encoder) PutString(s string) {
+	e.ensureBufferSpace(2 + len(s))
+	e.PutInt16(uint16(len(s)))
+	copy(e.b[e.offset:], s)
+	e.offset += len(s)
+}
+
+func (e *Encoder) PutCompactString(s string) {
 	e.ensureBufferSpace(4 + len(s)) // meh?
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(len(s)+1))
 	copy(e.b[e.offset:], s)
 	e.offset += len(s)
 }
 func (e *Encoder) PutBytes(b []byte) {
-	e.ensureBufferSpace(1)
+	e.ensureBufferSpace(len(b))
+	copy(e.b[e.offset:], b[:])
+	e.offset += len(b)
+}
+
+func (e *Encoder) PutCompactBytes(b []byte) {
+	e.ensureBufferSpace(4 + len(b))
+	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(len(b)+1))
 	copy(e.b[e.offset:], b[:])
 	e.offset += len(b)
 }
@@ -70,8 +99,18 @@ func (e *Encoder) PutCompactArrayLen(l int) {
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(l+1))
 }
 func (e *Encoder) PutLen() {
-	Encoding.PutUint32(e.b, uint32(e.offset-4))
+	lengthBytes := Encoding.AppendUint32([]byte{}, uint32(e.offset))
+	e.b = slices.Insert(e.b, 0, lengthBytes...)
+	e.offset += len(lengthBytes)
 }
+
+// put len as a varint at the start of the buffer
+func (e *Encoder) PutVarIntLen() {
+	lengthBytes := binary.AppendVarint([]byte{}, int64(e.offset))
+	e.b = slices.Insert(e.b, 0, lengthBytes...)
+	e.offset += len(lengthBytes)
+}
+
 func (e *Encoder) EndStruct() {
 	e.ensureBufferSpace(1)
 	// add 0 to indicate to end of tagged fields KIP-482
@@ -121,11 +160,19 @@ func (d *Decoder) UInt64() uint64 {
 	d.Offset += 8
 	return res
 }
+
 func (d *Decoder) UInt16() uint16 {
 	res := Encoding.Uint16(d.b[d.Offset:])
 	d.Offset += 2
 	return res
 }
+
+func (d *Decoder) UInt8() uint8 {
+	res := uint8(d.b[d.Offset])
+	d.Offset++
+	return res
+}
+
 func (d *Decoder) Bool() bool {
 	res := false
 	if d.b[d.Offset] > 0 {
@@ -141,6 +188,16 @@ func (d *Decoder) UUID() [16]byte {
 }
 
 func (d *Decoder) String() string {
+	stringLen := d.UInt16()
+	if stringLen == 0 { // nullable string
+		return ""
+	}
+	res := string(d.b[d.Offset : d.Offset+int(stringLen)])
+	d.Offset += int(stringLen)
+	return res
+}
+
+func (d *Decoder) CompactString() string {
 	stringLen, n := binary.Uvarint(d.b[d.Offset:])
 	d.Offset += n
 	if stringLen == 0 { // nullable string
@@ -159,11 +216,21 @@ func (d *Decoder) Bytes() []byte {
 	d.Offset += bytesLen
 	return res
 }
-func (d *Decoder) BytesWithLen() []byte {
+func (d *Decoder) CompactBytes() []byte {
 	bytesLen, n := binary.Uvarint(d.b[d.Offset:])
 	bytesLen--
-	res := d.b[d.Offset : d.Offset+int(bytesLen)+n]
-	d.Offset += int(bytesLen) + n
+	d.Offset += n
+	if bytesLen < 1 {
+		return []byte{}
+	}
+	res := d.b[d.Offset : d.Offset+int(bytesLen)]
+	d.Offset += int(bytesLen)
+	return res
+}
+
+func (d *Decoder) GetNBytes(n int) []byte {
+	res := d.b[d.Offset : d.Offset+int(n)]
+	d.Offset += int(n)
 	return res
 }
 
@@ -176,6 +243,12 @@ func (d *Decoder) CompactArrayLen() uint64 {
 
 func (d *Decoder) Uvarint() (uint64, int) {
 	varint, n := binary.Uvarint(d.b[d.Offset:])
+	d.Offset += n
+	return varint, n
+}
+
+func (d *Decoder) Varint() (int64, int) {
+	varint, n := binary.Varint(d.b[d.Offset:])
 	d.Offset += n
 	return varint, n
 }

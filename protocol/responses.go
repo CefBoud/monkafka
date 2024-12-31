@@ -24,7 +24,9 @@ func getAPIVersionResponse(req types.Request) []byte {
 		ApiKeys: []APIKey{
 			{ApiKey: ProduceKey, MinVersion: 0, MaxVersion: 11},
 			{ApiKey: FetchKey, MinVersion: 12, MaxVersion: 12},
+			{ApiKey: ListOffsetsKey, MinVersion: 0, MaxVersion: 9},
 			{ApiKey: MetadataKey, MinVersion: 0, MaxVersion: 12},
+			{ApiKey: OffsetCommitKey, MinVersion: 0, MaxVersion: 9},
 			{ApiKey: OffsetFetchKey, MinVersion: 0, MaxVersion: 9},
 			{ApiKey: FindCoordinatorKey, MinVersion: 0, MaxVersion: 6},
 			{ApiKey: JoinGroupKey, MinVersion: 0, MaxVersion: 9},
@@ -64,7 +66,7 @@ func getMetadataResponse(req types.Request) []byte {
 	if nbTopics > 0 {
 		for i := 0; i < int(nbTopics); i++ {
 			uuid := decoder.UUID()
-			name := decoder.String()
+			name := decoder.CompactString()
 			topicNameToUUID[name] = uuid
 			decoder.EndStruct()
 		}
@@ -73,11 +75,11 @@ func getMetadataResponse(req types.Request) []byte {
 	// Auto create topics if requested
 	allowAutoTopicCreation := decoder.Bool()
 	for name := range topicNameToUUID {
-		if _, exists := state.TopicStateInstance[types.TopicName(name)]; !exists {
+		if !state.TopicExists(name) {
 			if allowAutoTopicCreation {
 				err := storage.CreateTopic(name, 1)
 				if err != nil {
-					log.Error("Error creating topic ", err)
+					log.Error("Error creating topic. %v", err)
 				}
 			}
 		}
@@ -119,19 +121,19 @@ func getMetadataResponse(req types.Request) []byte {
 	// offset += 4
 	for _, bk := range response.Brokers {
 		encoder.PutInt32(uint32(bk.Node_id))
-		encoder.PutString(bk.Host)
+		encoder.PutCompactString(bk.Host)
 		encoder.PutInt32(uint32(bk.Port))
-		encoder.PutString(bk.Rack) // compact nullable string
+		encoder.PutCompactString(bk.Rack) // compact nullable string
 		encoder.EndStruct()
 	}
 	// cluster id compact_string
-	encoder.PutString(response.Cluster_id)
+	encoder.PutCompactString(response.Cluster_id)
 	encoder.PutInt32(uint32(response.Controller_id))
 	// topics compact_array
 	encoder.PutCompactArrayLen(len(response.Topics))
 	for _, tp := range response.Topics {
 		encoder.PutInt16(uint16(tp.Error_code))
-		encoder.PutString(tp.Name)
+		encoder.PutCompactString(tp.Name)
 		encoder.PutBytes(tp.Topic_id[:])
 		encoder.PutBool(tp.Is_internal)
 		encoder.PutCompactArrayLen(len(tp.Partitions))
@@ -167,7 +169,7 @@ func getMetadataResponse(req types.Request) []byte {
 func getCreateTopicResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	_ = decoder.CompactArrayLen() //topicsLen
-	topicName := decoder.String()
+	topicName := decoder.CompactString()
 	numPartitions := decoder.UInt32()
 
 	if int32(numPartitions) == -1 {
@@ -189,10 +191,10 @@ func getCreateTopicResponse(req types.Request) []byte {
 	// topics
 	encoder.PutCompactArrayLen(len(response.Topics))
 	for _, tp := range response.Topics {
-		encoder.PutString(tp.Name)
+		encoder.PutCompactString(tp.Name)
 		encoder.PutBytes(tp.TopicID[:]) // UUID
 		encoder.PutInt16(tp.ErrorCode)
-		encoder.PutString(tp.ErrorMessage)
+		encoder.PutCompactString(tp.ErrorMessage)
 		encoder.PutInt32(tp.NumPartitions)
 		encoder.PutInt16(tp.ReplicationFactor)
 
@@ -210,8 +212,8 @@ func getCreateTopicResponse(req types.Request) []byte {
 // InitProducerId (Api key = 22)
 func getInitProducerIdResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.String() //transactional_id
-	_ = decoder.UInt32() //transactionTimeoutMs
+	_ = decoder.CompactString() //transactional_id
+	_ = decoder.UInt32()        //transactionTimeoutMs
 	producerId := decoder.UInt64()
 	if int(producerId) == -1 {
 		producerId = 1 // TODO: set this value properly
@@ -243,12 +245,12 @@ func ReadTopicData(producerRequest []byte) []ProduceResponseTopicData {
 	decoder.Offset += 1 + 2 + 4 // no transactional_id + acks +timeout_ms
 	nbTopics := decoder.CompactArrayLen()
 	for i := 0; i < int(nbTopics); i++ {
-		topicName := decoder.String()
+		topicName := decoder.CompactString()
 		nbPartitions := decoder.CompactArrayLen()
 		var partition_data []ProduceResponsePartitionData
 		for j := 0; j < int(nbPartitions); j++ {
 			index := decoder.UInt32()
-			data := decoder.BytesWithLen()
+			data := decoder.CompactBytes()
 			partition_data = append(partition_data, ProduceResponsePartitionData{Index: index, RecordsData: data})
 			decoder.EndStruct()
 		}
@@ -262,14 +264,14 @@ func writeProducedRecords(topic_data []ProduceResponseTopicData) error {
 		for _, pd := range td.Partition_data {
 			partitionDir := storage.GetPartitionDir(td.Name, pd.Index)
 			err := os.MkdirAll(partitionDir, 0750)
-			log.Debug("Writing within partition dir ", partitionDir)
+			log.Debug("Writing within partition dir %v", partitionDir)
 			if err != nil {
-				log.Error("Error creating topic directory:", err)
+				log.Error("Error creating topic directory: %v", err)
 				return err
 			}
 			err = storage.AppendRecord(td.Name, pd.Index, pd.RecordsData)
 			if err != nil {
-				log.Error("Error AppendRecord:", err)
+				log.Error("Error AppendRecord: %v", err)
 				return err
 			}
 		}
@@ -301,7 +303,7 @@ func getProduceResponse(req types.Request) []byte {
 
 	encoder.PutCompactArrayLen(len(response.ProduceTopicResponses))
 	for _, topicResp := range response.ProduceTopicResponses {
-		encoder.PutString(topicResp.Name)
+		encoder.PutCompactString(topicResp.Name)
 		encoder.PutCompactArrayLen(len(topicResp.ProducePartitionResponses))
 		for _, partitionResp := range topicResp.ProducePartitionResponses {
 			encoder.PutInt32(partitionResp.Index)
@@ -311,7 +313,7 @@ func getProduceResponse(req types.Request) []byte {
 			encoder.PutInt64(partitionResp.LogStartOffset)
 			encoder.PutCompactArrayLen(len(partitionResp.RecordErrors))
 			// TODO add record errors
-			encoder.PutString(partitionResp.ErrorMessage)
+			encoder.PutCompactString(partitionResp.ErrorMessage)
 			encoder.EndStruct()
 		}
 		encoder.EndStruct()
@@ -336,12 +338,12 @@ func getFindCoordinatorResponse(req types.Request) []byte {
 	}}
 	encoder.PutCompactArrayLen(len(coordinators))
 	for _, c := range coordinators {
-		encoder.PutString(c.Key)
+		encoder.PutCompactString(c.Key)
 		encoder.PutInt32(c.NodeID)
-		encoder.PutString(c.Host)
+		encoder.PutCompactString(c.Host)
 		encoder.PutInt32(c.Port)
 		encoder.PutInt16(c.ErrorCode)
-		encoder.PutString(c.ErrorMessage)
+		encoder.PutCompactString(c.ErrorMessage)
 		encoder.EndStruct()
 	}
 	return encoder.FinishAndReturn()
@@ -349,15 +351,15 @@ func getFindCoordinatorResponse(req types.Request) []byte {
 
 func getJoinGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	groupId := decoder.String()
+	groupId := decoder.CompactString()
 	decoder.Offset += 4 + 4 //session_timeout_ms + rebalance_timeout_ms
-	memberId := decoder.String()
-	groupInstanceId := decoder.String()
-	protocolType := decoder.String()
+	memberId := decoder.CompactString()
+	groupInstanceId := decoder.CompactString()
+	protocolType := decoder.CompactString()
 	var protocolName []string
 	var metadataBytes [][]byte
 	for i := 0; i < int(decoder.CompactArrayLen()); i++ {
-		protocolName = append(protocolName, decoder.String())
+		protocolName = append(protocolName, decoder.CompactString())
 		metadataBytes = append(metadataBytes, decoder.Bytes())
 	}
 
@@ -382,16 +384,16 @@ func getJoinGroupResponse(req types.Request) []byte {
 	encoder.PutInt32(response.ThrottleTimeMS) // throttle_time_ms
 	encoder.PutInt16(response.ErrorCode)
 	encoder.PutInt32(response.GenerationID)
-	encoder.PutString(response.ProtocolType)
-	encoder.PutString(response.ProtocolName)
-	encoder.PutString(response.Leader)
+	encoder.PutCompactString(response.ProtocolType)
+	encoder.PutCompactString(response.ProtocolName)
+	encoder.PutCompactString(response.Leader)
 	encoder.PutBool(response.SkipAssignment)
-	encoder.PutString(response.MemberID)
+	encoder.PutCompactString(response.MemberID)
 	encoder.PutCompactArrayLen(len(response.Members))
 	for _, m := range response.Members {
-		encoder.PutString(m.MemberID)
+		encoder.PutCompactString(m.MemberID)
 		// encoder.PutCompactArrayLen(-1)
-		encoder.PutString(m.GroupInstanceID)
+		encoder.PutCompactString(m.GroupInstanceID)
 		encoder.PutCompactArrayLen(len(m.Metadata))
 		encoder.PutBytes(m.Metadata)
 		encoder.EndStruct()
@@ -412,16 +414,16 @@ func getHeartbeatResponse(req types.Request) []byte {
 func getSyncGroupResponse(req types.Request) []byte {
 	// get assignment bytes from request
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.String() //groupId
-	_ = decoder.UInt32() //generationId
-	_ = decoder.String() //memberId
-	_ = decoder.String() //groupInstanceId
-	protocolType := decoder.String()
-	protocolName := decoder.String()
+	_ = decoder.CompactString() //groupId
+	_ = decoder.UInt32()        //generationId
+	_ = decoder.CompactString() //memberId
+	_ = decoder.CompactString() //groupInstanceId
+	protocolType := decoder.CompactString()
+	protocolName := decoder.CompactString()
 	nbAssignments := decoder.CompactArrayLen()
 	assignmentBytes := make([][]byte, nbAssignments) // TODO : handle this properly
 	for i := 0; i < int(nbAssignments); i++ {
-		_ = decoder.String() //memberId
+		_ = decoder.CompactString() //memberId
 		assignmentBytes[i] = decoder.Bytes()
 		decoder.EndStruct()
 	}
@@ -432,8 +434,8 @@ func getSyncGroupResponse(req types.Request) []byte {
 	encoder.PutInt32(0) //throttle_time_ms
 	encoder.PutInt16(0) //error_code
 
-	encoder.PutString(protocolType)
-	encoder.PutString(protocolName)
+	encoder.PutCompactString(protocolType)
+	encoder.PutCompactString(protocolName)
 
 	// assignments COMPACT_BYTES
 	//  SyncGroupResponseData(throttleTimeMs=0, errorCode=0, protocolType='consumer', protocolName='range', assignment=[0, 3, 0, 0, 0, 1, 0, 4, 116, 105, 116, 105, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, -1, -1])
@@ -443,16 +445,15 @@ func getSyncGroupResponse(req types.Request) []byte {
 	return encoder.FinishAndReturn()
 }
 func getOffsetFetchResponse(req types.Request) []byte {
-	// TODO: implement __consumer_offsets
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.CompactArrayLen() // nbGroups
-	groupId := decoder.String()   //groupId
-	_ = decoder.String()          //memberId
-	_ = decoder.UInt32()          //memberEpoch
+	_ = decoder.CompactArrayLen()      // nbGroups
+	groupId := decoder.CompactString() //groupId
+	_ = decoder.CompactString()        //memberId
+	_ = decoder.UInt32()               //memberEpoch
 	nbTopics := decoder.CompactArrayLen()
 	topic_partitions := make(map[string][]uint32)
 	for i := uint64(0); i < nbTopics; i++ {
-		topicName := decoder.String()
+		topicName := decoder.CompactString()
 		topic_partitions[topicName] = make([]uint32, 0)
 		nbPartitions := decoder.CompactArrayLen()
 		for j := uint64(0); j < nbPartitions; j++ {
@@ -463,10 +464,14 @@ func getOffsetFetchResponse(req types.Request) []byte {
 	response := OffsetFetchResponse{Groups: []OffsetFetchGroup{
 		{GroupID: groupId, Topics: []OffsetFetchTopic{}},
 	}}
+	// if state.GroupExists(groupId) {
 	for tp, partitions := range topic_partitions {
 		offsetFetchTopic := OffsetFetchTopic{Name: tp}
 		for _, p := range partitions {
-			offsetFetchTopic.Partitions = append(offsetFetchTopic.Partitions, OffsetFetchPartition{PartitionIndex: p})
+			offsetFetchTopic.Partitions = append(offsetFetchTopic.Partitions, OffsetFetchPartition{
+				PartitionIndex:  p,
+				CommittedOffset: uint64(GetCommittedOffset(groupId, tp, p)), // -1 triggers a ListOffsets request
+			})
 		}
 		response.Groups[0].Topics = append(response.Groups[0].Topics, offsetFetchTopic)
 	}
@@ -477,20 +482,81 @@ func getOffsetFetchResponse(req types.Request) []byte {
 	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
 	encoder.PutCompactArrayLen(len(response.Groups))
 	for _, g := range response.Groups {
-		encoder.PutString(g.GroupID)
+		encoder.PutCompactString(g.GroupID)
 		encoder.PutCompactArrayLen(len(g.Topics))
 		for _, t := range g.Topics {
-			encoder.PutString(t.Name)
+			encoder.PutCompactString(t.Name)
 			encoder.PutCompactArrayLen(len(t.Partitions))
 			for _, p := range t.Partitions {
 				encoder.PutInt32(p.PartitionIndex)
 				encoder.PutInt64(p.CommittedOffset)
 				encoder.PutInt32(p.CommittedLeaderEpoch)
-				encoder.PutString(p.Metadata)
+				encoder.PutCompactString(p.Metadata)
 				encoder.PutInt16(p.ErrorCode)
 				encoder.EndStruct()
 			}
 			encoder.PutInt16(t.ErrorCode)
+			encoder.EndStruct()
+		}
+		encoder.EndStruct()
+	}
+	return encoder.FinishAndReturn()
+}
+
+func getOffsetCommitResponse(req types.Request) []byte {
+	offsetCommitRequest := OffsetCommitRequest{}
+	decoder := serde.NewDecoder(req.Body)
+
+	offsetCommitRequest.GroupID = decoder.CompactString()
+	offsetCommitRequest.GenerationIDOrMemberEpoch = decoder.UInt32()
+	offsetCommitRequest.MemberID = decoder.CompactString()
+	offsetCommitRequest.GroupInstanceID = decoder.CompactString()
+
+	nbTopics := decoder.CompactArrayLen()
+	for i := uint64(0); i < nbTopics; i++ {
+		topic := OffsetCommitRequestTopic{}
+		topic.Name = decoder.CompactString()
+		nbPartitions := decoder.CompactArrayLen()
+		for j := uint64(0); j < nbPartitions; j++ {
+			topic.Partitions = append(topic.Partitions, OffsetCommitRequestPartition{
+				PartitionIndex:       decoder.UInt32(),
+				CommittedOffset:      decoder.UInt64(),
+				CommittedLeaderEpoch: decoder.UInt32(),
+				CommittedMetadata:    decoder.CompactString(),
+			})
+			decoder.EndStruct()
+		}
+		offsetCommitRequest.Topics = append(offsetCommitRequest.Topics, topic)
+		decoder.EndStruct()
+	}
+
+	log.Debug("offsetCommitRequest %+v", offsetCommitRequest)
+
+	for _, recordBytes := range serializeConsumerOffsetRecord(offsetCommitRequest) {
+		storage.AppendRecord(ConsumerOffsetsTopic, 0, recordBytes)
+		UpdateGroupMetadataState(recordBytes)
+	}
+
+	response := OffsetCommitResponse{}
+	for _, topic := range offsetCommitRequest.Topics {
+		offsetCommitTopic := OffsetCommitResponseTopic{Name: topic.Name}
+		for _, p := range topic.Partitions {
+			offsetCommitTopic.Partitions = append(offsetCommitTopic.Partitions, OffsetCommitResponsePartition{PartitionIndex: p.PartitionIndex})
+		}
+		response.Topics = append(response.Topics, offsetCommitTopic)
+	}
+
+	encoder := serde.NewEncoder()
+	encoder.PutInt32(req.CorrelationID)
+	encoder.EndStruct()                       // end header
+	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
+	encoder.PutCompactArrayLen(len(response.Topics))
+	for _, t := range response.Topics {
+		encoder.PutCompactString(t.Name)
+		encoder.PutCompactArrayLen(len(t.Partitions))
+		for _, p := range t.Partitions {
+			encoder.PutInt32(p.PartitionIndex)
+			encoder.PutInt16(p.ErrorCode)
 			encoder.EndStruct()
 		}
 		encoder.EndStruct()
@@ -509,7 +575,7 @@ func getFetchResponse(req types.Request) []byte {
 	topic_partitions := make(map[string][]PartitionOffset)
 	for i := uint64(0); i < nbTopics; i++ {
 
-		topicName := decoder.String()
+		topicName := decoder.CompactString()
 		nbPartitions := decoder.CompactArrayLen()
 		for j := uint64(0); j < nbPartitions; j++ {
 			index := decoder.UInt32()
@@ -527,16 +593,18 @@ func getFetchResponse(req types.Request) []byte {
 		fetchTopicResponse := FetchTopicResponse{TopicName: tp}
 		for _, p := range partitions {
 			recordBytes, err := storage.GetRecord(p.fetchOffset, tp, p.index)
+			// log.Debug("getFetchResponse GetRecord recordBytes %v", recordBytes)
 			numTotalRecordBytes += len(recordBytes)
 			if err != nil {
 				log.Error("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.fetchOffset), tp, p.index, err)
 			}
+
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
 					PartitionIndex:       p.index,
-					HighWatermark:        uint64(MINUS_ONE), //uint64(MINUS_ONE),
+					HighWatermark:        state.GetPartition(tp, p.index).EndOffset(), //uint64(MINUS_ONE),
 					LastStableOffset:     uint64(MINUS_ONE),
-					LogStartOffset:       0,
+					LogStartOffset:       state.GetPartition(tp, p.index).StartOffset(),
 					PreferredReadReplica: 1,
 					Records:              recordBytes, // []byte(line),
 				})
@@ -555,7 +623,7 @@ func getFetchResponse(req types.Request) []byte {
 	encoder.PutInt32(response.SessionId)
 	encoder.PutCompactArrayLen(len(response.Responses))
 	for _, r := range response.Responses {
-		encoder.PutString(r.TopicName)
+		encoder.PutCompactString(r.TopicName)
 		encoder.PutCompactArrayLen(len(r.Partitions))
 		for _, p := range r.Partitions {
 			encoder.PutInt32(p.PartitionIndex)
@@ -566,13 +634,83 @@ func getFetchResponse(req types.Request) []byte {
 
 			encoder.PutCompactArrayLen(len(p.AbortedTransactions))
 			encoder.PutInt32(p.PreferredReadReplica)
-			// length is already included in p.Records if defined. If not, we set it ourselves
+
 			if len(p.Records) > 0 {
-				encoder.PutBytes(p.Records)
+				encoder.PutCompactBytes(p.Records)
 			} else {
 				encoder.PutCompactArrayLen(len(p.Records))
 			}
 
+			encoder.EndStruct()
+		}
+		encoder.EndStruct()
+	}
+	return encoder.FinishAndReturn()
+}
+
+func getListOffsetsResponse(req types.Request) []byte {
+	decoder := serde.NewDecoder(req.Body)
+	listOffsetsRequest := ListOffsetsRequest{
+		ReplicaID:      decoder.UInt32(),
+		IsolationLevel: decoder.UInt8(),
+	}
+
+	numTopics := decoder.CompactArrayLen()
+
+	for i := uint64(0); i < numTopics; i++ {
+		topic := ListOffsetsRequestTopic{
+			Name: decoder.CompactString(),
+		}
+		numPartitions := decoder.CompactArrayLen()
+		for j := uint64(0); j < numPartitions; j++ {
+
+			topic.Partitions = append(topic.Partitions, ListOffsetsRequestPartition{
+				PartitionIndex:     decoder.UInt32(),
+				CurrentLeaderEpoch: decoder.UInt32(),
+				Timestamp:          decoder.UInt64(),
+			})
+			decoder.EndStruct()
+		}
+		decoder.EndStruct()
+		listOffsetsRequest.Topics = append(listOffsetsRequest.Topics, topic)
+	}
+	// log.Debug("listOffsetsRequest %+v", listOffsetsRequest)
+
+	response := ListOffsetsResponse{}
+	for _, t := range listOffsetsRequest.Topics {
+		topic := ListOffsetsResponseTopic{Name: t.Name}
+		for _, p := range t.Partitions {
+			partition := ListOffsetsResponsePartition{PartitionIndex: p.PartitionIndex, LeaderEpoch: uint32(MINUS_ONE)}
+			if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
+				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).StartOffset()
+			} else if p.Timestamp == uint64(ListOffsetsLatestTimestamp) {
+				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).EndOffset()
+				partition.Timestamp = state.GetPartition(t.Name, p.PartitionIndex).ActiveSegment().MaxTimestamp
+			} else {
+				// TODO: implement ListOffsetsMaxTimestamp
+				log.Error("ListOffsetsMaxTimestamp not implemented!")
+				os.Exit(1)
+			}
+			topic.Partitions = append(topic.Partitions, partition)
+		}
+		response.Topics = append(response.Topics, topic)
+	}
+	log.Debug("ListOffsetsResponse %+v", response)
+
+	encoder := serde.NewEncoder()
+	encoder.PutInt32(req.CorrelationID)
+	encoder.EndStruct() // end header
+	encoder.PutInt32(response.ThrottleTimeMs)
+	encoder.PutCompactArrayLen(len(response.Topics))
+	for _, t := range response.Topics {
+		encoder.PutCompactString(t.Name)
+		encoder.PutCompactArrayLen(len(t.Partitions))
+		for _, p := range t.Partitions {
+			encoder.PutInt32(p.PartitionIndex)
+			encoder.PutInt16(p.ErrorCode)
+			encoder.PutInt64(p.Timestamp)
+			encoder.PutInt64(p.Offset)
+			encoder.PutInt32(p.LeaderEpoch)
 			encoder.EndStruct()
 		}
 		encoder.EndStruct()
