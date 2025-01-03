@@ -2,8 +2,10 @@ package serde
 
 import (
 	"encoding/binary"
+	"reflect"
 	"slices"
 
+	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/types"
 )
 
@@ -30,6 +32,62 @@ func (e *Encoder) ensureBufferSpace(off int) {
 		newBuffer := make([]byte, len(e.b)+BufferIncrement)
 		copy(newBuffer, e.b)
 		e.b = newBuffer
+	}
+}
+
+// Encode encodes a struct using reflection
+func (e *Encoder) Encode(x any) {
+	t := reflect.TypeOf(x)
+	v := reflect.ValueOf(x)
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i)
+		if field.Type.Kind() == reflect.Slice {
+			e.PutCompactArrayLen(value.Len())
+			if field.Type.Elem().Kind() == reflect.Struct { // Slice of structs
+				for j := 0; j < value.Len(); j++ {
+					e.Encode(value.Index(j).Interface())
+				}
+			} else { // Slice of basic types
+				for j := 0; j < value.Len(); j++ {
+					e.Put(value.Index(j).Interface())
+				}
+			}
+		} else if field.Type.Kind() == reflect.Struct {
+			e.Encode(value.Interface())
+		} else {
+			e.Put(value.Interface())
+		}
+	}
+	e.EndStruct()
+}
+
+// Put encodes input based on its type
+func (e *Encoder) Put(i any, a ...any) {
+	switch c := i.(type) {
+	case bool:
+		e.PutBool(c)
+	case uint8:
+		e.PutInt8(c)
+	case uint16:
+		e.PutInt16(c)
+	case uint32:
+		e.PutInt32(c)
+	case uint64:
+		e.PutInt64(c)
+	case int:
+		e.PutVarint(c)
+	case uint:
+		e.PutUvarint(c)
+	case string:
+		e.PutCompactString(c)
+	case []byte:
+		e.PutCompactBytes(c)
+	case [16]byte:
+		e.PutBytes(c[:])
+	default:
+		log.Panic("Unknown type %T", c)
 	}
 }
 
@@ -72,14 +130,14 @@ func (e *Encoder) PutBool(b bool) {
 }
 
 // PutUvarint encodes a length as an unsigned varint
-func (e *Encoder) PutUvarint(l int) {
-	e.ensureBufferSpace(4 + l)
+func (e *Encoder) PutUvarint(l uint) {
+	e.ensureBufferSpace(5 + int(l))
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(l))
 }
 
 // PutVarint encodes a length as a signed varint
 func (e *Encoder) PutVarint(l int) {
-	e.ensureBufferSpace(4 + l)
+	e.ensureBufferSpace(5 + l)
 	e.offset += binary.PutVarint(e.b[e.offset:], int64(l))
 }
 
@@ -93,7 +151,7 @@ func (e *Encoder) PutString(s string) {
 
 // PutCompactString encodes a string using a compressed length format
 func (e *Encoder) PutCompactString(s string) {
-	e.ensureBufferSpace(4 + len(s)) // meh?
+	e.ensureBufferSpace(5 + len(s))
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(len(s)+1))
 	copy(e.b[e.offset:], s)
 	e.offset += len(s)
@@ -108,7 +166,7 @@ func (e *Encoder) PutBytes(b []byte) {
 
 // PutCompactBytes encodes a byte slice using a compressed length format
 func (e *Encoder) PutCompactBytes(b []byte) {
-	e.ensureBufferSpace(4 + len(b))
+	e.ensureBufferSpace(5 + len(b))
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(len(b)+1))
 	copy(e.b[e.offset:], b[:])
 	e.offset += len(b)
@@ -116,7 +174,7 @@ func (e *Encoder) PutCompactBytes(b []byte) {
 
 // PutCompactArrayLen encodes the length of a compact array
 func (e *Encoder) PutCompactArrayLen(l int) {
-	e.ensureBufferSpace(4 + l) // meh as well?
+	e.ensureBufferSpace(5 + l)
 	// nil arrays should give -1
 	e.offset += binary.PutUvarint(e.b[e.offset:], uint64(l+1))
 }
@@ -145,6 +203,15 @@ func (e *Encoder) EndStruct() {
 // Bytes returns the encoded data as a byte slice
 func (e *Encoder) Bytes() []byte {
 	return e.b[:e.offset]
+}
+
+// EncodeResponseBytes serializes encodes the response into bytes
+func (e *Encoder) EncodeResponseBytes(req types.Request, response any) []byte {
+	e.PutInt32(req.CorrelationID)
+	e.EndStruct()
+	e.Encode(response)
+	e.PutLen()
+	return e.Bytes()
 }
 
 // FinishAndReturn finishes the encoding and returns the final byte slice

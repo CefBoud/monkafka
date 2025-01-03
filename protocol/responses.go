@@ -24,8 +24,7 @@ const DefaultNumPartition = 1
 
 // APIVersion (Api key = 18)
 func getAPIVersionResponse(req types.Request) []byte {
-	APIVersions := APIVersionsResponse{
-		ErrorCode: 0,
+	response := APIVersionsResponse{
 		APIKeys: []APIKey{
 			{APIKey: produceKey, MinVersion: 0, MaxVersion: 11},
 			{APIKey: fetchKey, MinVersion: 12, MaxVersion: 12},
@@ -43,16 +42,10 @@ func getAPIVersionResponse(req types.Request) []byte {
 		},
 	}
 
+	// we are not using EncodeResponseBytes because APIversion doesn't use tagged buffers
 	encoder := serde.NewEncoder()
 	encoder.PutInt32(req.CorrelationID)
-	encoder.PutInt16(APIVersions.ErrorCode)
-	encoder.PutInt32(uint32(len(APIVersions.APIKeys)))
-	for _, k := range APIVersions.APIKeys {
-		encoder.PutInt16(k.APIKey)
-		encoder.PutInt16(k.MinVersion)
-		encoder.PutInt16(k.MaxVersion)
-	}
-	encoder.PutInt32(0) //ThrottleTime
+	encoder.Encode(response)
 	encoder.PutLen()
 	return encoder.Bytes()
 
@@ -91,15 +84,16 @@ func getMetadataResponse(req types.Request) []byte {
 		}
 	}
 	for name, uuid := range topicNameToUUID {
+		topic := MetadataResponseTopic{ErrorCode: 0, Name: name, TopicID: uuid, IsInternal: false}
 		for partitionIndex := range state.TopicStateInstance[types.TopicName(name)] {
-			topics = append(topics, MetadataResponseTopic{ErrorCode: 0, Name: name, TopicID: uuid, IsInternal: false, Partitions: []MetadataResponsePartition{{
+			topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
 				ErrorCode:      0,
 				PartitionIndex: uint32(partitionIndex),
 				LeaderID:       1,
 				ReplicaNodes:   []uint32{1},
-				IsrNodes:       []uint32{1}},
-			}})
+				IsrNodes:       []uint32{1}})
 		}
+		topics = append(topics, topic)
 	}
 
 	response := MetadataResponse{
@@ -115,60 +109,9 @@ func getMetadataResponse(req types.Request) []byte {
 		ControllerID: 1,
 		Topics:       topics,
 	}
+
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // header end
-
-	encoder.PutInt32(uint32(response.ThrottleTimeMs))
-
-	// brokers
-	encoder.PutCompactArrayLen(len(response.Brokers))
-	// Encoding.PutUint32(b[offset:], uint32(len(response.brokers)))
-	// offset += 4
-	for _, bk := range response.Brokers {
-		encoder.PutInt32(uint32(bk.NodeID))
-		encoder.PutCompactString(bk.Host)
-		encoder.PutInt32(uint32(bk.Port))
-		encoder.PutCompactString(bk.Rack) // compact nullable string
-		encoder.EndStruct()
-	}
-	// cluster id compact_string
-	encoder.PutCompactString(response.ClusterID)
-	encoder.PutInt32(uint32(response.ControllerID))
-	// topics compact_array
-	encoder.PutCompactArrayLen(len(response.Topics))
-	for _, tp := range response.Topics {
-		encoder.PutInt16(uint16(tp.ErrorCode))
-		encoder.PutCompactString(tp.Name)
-		encoder.PutBytes(tp.TopicID[:])
-		encoder.PutBool(tp.IsInternal)
-		encoder.PutCompactArrayLen(len(tp.Partitions))
-
-		for _, par := range tp.Partitions {
-			encoder.PutInt16(uint16(par.ErrorCode))
-			encoder.PutInt32(uint32(par.PartitionIndex))
-			encoder.PutInt32(uint32(par.LeaderID))
-			// replicas
-			encoder.PutCompactArrayLen(len(par.ReplicaNodes))
-			for _, rn := range par.ReplicaNodes {
-				encoder.PutInt32(uint32(rn))
-			}
-			// isrs
-			encoder.PutCompactArrayLen(len(par.IsrNodes))
-			for _, isr := range par.ReplicaNodes {
-				encoder.PutInt32(uint32(isr))
-			}
-			encoder.PutCompactArrayLen(len(par.OfflineReplicas))
-			for _, off := range par.OfflineReplicas {
-				encoder.PutInt32(uint32(off))
-			}
-			encoder.EndStruct()
-		}
-
-		encoder.PutInt32(tp.TopicAuthorizedOperations)
-		encoder.EndStruct() // end topic
-	}
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 // CreateTopics	(Api key = 19)
@@ -189,30 +132,14 @@ func getCreateTopicResponse(req types.Request) []byte {
 			ReplicationFactor: 1,
 			Configs:           []CreateTopicsResponseConfig{},
 		}}}
-	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct()                       // end header
-	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
-
-	// topics
-	encoder.PutCompactArrayLen(len(response.Topics))
-	for _, tp := range response.Topics {
-		encoder.PutCompactString(tp.Name)
-		encoder.PutBytes(tp.TopicID[:]) // UUID
-		encoder.PutInt16(tp.ErrorCode)
-		encoder.PutCompactString(tp.ErrorMessage)
-		encoder.PutInt32(tp.NumPartitions)
-		encoder.PutInt16(tp.ReplicationFactor)
-
-		encoder.PutCompactArrayLen(len(tp.Configs)) // empty config array
-		encoder.EndStruct()
-	}
 
 	err := storage.CreateTopic(topicName, numPartitions)
 	if err != nil {
 		log.Error("Error creating topic %v", err)
 	}
-	return encoder.FinishAndReturn()
+
+	encoder := serde.NewEncoder()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 // InitProducerID (Api key = 22)
@@ -233,14 +160,9 @@ func getInitProducerIDResponse(req types.Request) []byte {
 		ProducerID:    producerID,
 		ProducerEpoch: epochID,
 	}
+
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-	encoder.PutInt32(response.ThrottleTimeMs)
-	encoder.PutInt16(response.ErrorCode)
-	encoder.PutInt64(response.ProducerID)
-	encoder.PutInt16(response.ProducerEpoch)
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 // ReadTopicData Producer (Api key = 0)
@@ -294,10 +216,6 @@ func getProduceResponse(req types.Request) []byte {
 	}
 	response := ProduceResponse{}
 
-	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-
 	for _, td := range topicData {
 		produceTopicResponse := ProduceTopicResponse{Name: td.Name}
 		for _, pd := range td.PartitionData {
@@ -307,52 +225,22 @@ func getProduceResponse(req types.Request) []byte {
 		response.ProduceTopicResponses = append(response.ProduceTopicResponses, produceTopicResponse)
 	}
 
-	encoder.PutCompactArrayLen(len(response.ProduceTopicResponses))
-	for _, topicResp := range response.ProduceTopicResponses {
-		encoder.PutCompactString(topicResp.Name)
-		encoder.PutCompactArrayLen(len(topicResp.ProducePartitionResponses))
-		for _, partitionResp := range topicResp.ProducePartitionResponses {
-			encoder.PutInt32(partitionResp.Index)
-			encoder.PutInt16(partitionResp.ErrorCode)
-			encoder.PutInt64(partitionResp.BaseOffset)
-			encoder.PutInt64(partitionResp.LogAppendTimeMs)
-			encoder.PutInt64(partitionResp.LogStartOffset)
-			encoder.PutCompactArrayLen(len(partitionResp.RecordErrors))
-			// TODO add record errors
-			encoder.PutCompactString(partitionResp.ErrorMessage)
-			encoder.EndStruct()
-		}
-		encoder.EndStruct()
-	}
-
-	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
-	return encoder.FinishAndReturn()
+	encoder := serde.NewEncoder()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getFindCoordinatorResponse(req types.Request) []byte {
 	// TODO: get requested coordinator keys
-	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-	encoder.PutInt32(0) // throttle_time_ms
-	// TODO: populate this properly
-	coordinators := []FindCoordinatorResponseCoordinator{{
-		Key:    "dummy", //"console-consumer-22229",
-		NodeID: 1,
-		Host:   state.Config.BrokerHost,
-		Port:   state.Config.BrokerPort,
-	}}
-	encoder.PutCompactArrayLen(len(coordinators))
-	for _, c := range coordinators {
-		encoder.PutCompactString(c.Key)
-		encoder.PutInt32(c.NodeID)
-		encoder.PutCompactString(c.Host)
-		encoder.PutInt32(c.Port)
-		encoder.PutInt16(c.ErrorCode)
-		encoder.PutCompactString(c.ErrorMessage)
-		encoder.EndStruct()
+	response := FindCoordinatorResponse{
+		Coordinators: []FindCoordinatorResponseCoordinator{{
+			Key:    "dummy", //"console-consumer-22229",
+			NodeID: 1,
+			Host:   state.Config.BrokerHost,
+			Port:   state.Config.BrokerPort,
+		}},
 	}
-	return encoder.FinishAndReturn()
+	encoder := serde.NewEncoder()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getJoinGroupResponse(req types.Request) []byte {
@@ -383,38 +271,15 @@ func getJoinGroupResponse(req types.Request) []byte {
 				Metadata: metadataBytes[0]},
 		},
 	}
-	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
 
-	encoder.PutInt32(response.ThrottleTimeMS) // throttle_time_ms
-	encoder.PutInt16(response.ErrorCode)
-	encoder.PutInt32(response.GenerationID)
-	encoder.PutCompactString(response.ProtocolType)
-	encoder.PutCompactString(response.ProtocolName)
-	encoder.PutCompactString(response.Leader)
-	encoder.PutBool(response.SkipAssignment)
-	encoder.PutCompactString(response.MemberID)
-	encoder.PutCompactArrayLen(len(response.Members))
-	for _, m := range response.Members {
-		encoder.PutCompactString(m.MemberID)
-		// encoder.PutCompactArrayLen(-1)
-		encoder.PutCompactString(m.GroupInstanceID)
-		encoder.PutCompactArrayLen(len(m.Metadata))
-		encoder.PutBytes(m.Metadata)
-		encoder.EndStruct()
-	}
-	return encoder.FinishAndReturn()
+	encoder := serde.NewEncoder()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getHeartbeatResponse(req types.Request) []byte {
+	response := HeartbeatResponse{}
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-
-	encoder.PutInt32(0) //throttle_time_ms
-	encoder.PutInt16(0) //error_code
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getSyncGroupResponse(req types.Request) []byte {
@@ -424,32 +289,23 @@ func getSyncGroupResponse(req types.Request) []byte {
 	_ = decoder.UInt32()        //generationId
 	_ = decoder.CompactString() //memberID
 	_ = decoder.CompactString() //groupInstanceID
-	protocolType := decoder.CompactString()
-	protocolName := decoder.CompactString()
+
+	response := SyncGroupResponse{
+		ProtocolType: decoder.CompactString(),
+		ProtocolName: decoder.CompactString(),
+	}
 	nbAssignments := decoder.CompactArrayLen()
-	assignmentBytes := make([][]byte, nbAssignments) // TODO : handle this properly
+	// TODO : handle this properly
 	for i := 0; i < int(nbAssignments); i++ {
 		_ = decoder.CompactString() //memberID
-		assignmentBytes[i] = decoder.Bytes()
+		response.AssignmentBytes = decoder.Bytes()
 		decoder.EndStruct()
 	}
-	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-
-	encoder.PutInt32(0) //throttle_time_ms
-	encoder.PutInt16(0) //error_code
-
-	encoder.PutCompactString(protocolType)
-	encoder.PutCompactString(protocolName)
-
-	// assignments COMPACT_BYTES
 	//  SyncGroupResponseData(throttleTimeMs=0, errorCode=0, protocolType='consumer', protocolName='range', assignment=[0, 3, 0, 0, 0, 1, 0, 4, 116, 105, 116, 105, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, -1, -1])
-	encoder.PutCompactArrayLen(len(assignmentBytes[0]))
-	encoder.PutBytes(assignmentBytes[0])
-	// end assignments
-	return encoder.FinishAndReturn()
+	encoder := serde.NewEncoder()
+	return encoder.EncodeResponseBytes(req, response)
 }
+
 func getOffsetFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	_ = decoder.CompactArrayLen()      // nbGroups
@@ -483,30 +339,7 @@ func getOffsetFetchResponse(req types.Request) []byte {
 	}
 
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct()                       // end header
-	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
-	encoder.PutCompactArrayLen(len(response.Groups))
-	for _, g := range response.Groups {
-		encoder.PutCompactString(g.GroupID)
-		encoder.PutCompactArrayLen(len(g.Topics))
-		for _, t := range g.Topics {
-			encoder.PutCompactString(t.Name)
-			encoder.PutCompactArrayLen(len(t.Partitions))
-			for _, p := range t.Partitions {
-				encoder.PutInt32(p.PartitionIndex)
-				encoder.PutInt64(p.CommittedOffset)
-				encoder.PutInt32(p.CommittedLeaderEpoch)
-				encoder.PutCompactString(p.Metadata)
-				encoder.PutInt16(p.ErrorCode)
-				encoder.EndStruct()
-			}
-			encoder.PutInt16(t.ErrorCode)
-			encoder.EndStruct()
-		}
-		encoder.EndStruct()
-	}
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getOffsetCommitResponse(req types.Request) []byte {
@@ -553,21 +386,7 @@ func getOffsetCommitResponse(req types.Request) []byte {
 	}
 
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct()                       // end header
-	encoder.PutInt32(response.ThrottleTimeMs) // throttle_time_ms
-	encoder.PutCompactArrayLen(len(response.Topics))
-	for _, t := range response.Topics {
-		encoder.PutCompactString(t.Name)
-		encoder.PutCompactArrayLen(len(t.Partitions))
-		for _, p := range t.Partitions {
-			encoder.PutInt32(p.PartitionIndex)
-			encoder.PutInt16(p.ErrorCode)
-			encoder.EndStruct()
-		}
-		encoder.EndStruct()
-	}
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getFetchResponse(req types.Request) []byte {
@@ -622,36 +441,7 @@ func getFetchResponse(req types.Request) []byte {
 		time.Sleep(300 * time.Millisecond) // TODO get this from consumer settings
 	}
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-	encoder.PutInt32(response.ThrottleTimeMs)
-	encoder.PutInt16(response.ErrorCode)
-	encoder.PutInt32(response.SessionID)
-	encoder.PutCompactArrayLen(len(response.Responses))
-	for _, r := range response.Responses {
-		encoder.PutCompactString(r.TopicName)
-		encoder.PutCompactArrayLen(len(r.Partitions))
-		for _, p := range r.Partitions {
-			encoder.PutInt32(p.PartitionIndex)
-			encoder.PutInt16(p.ErrorCode)
-			encoder.PutInt64(p.HighWatermark)
-			encoder.PutInt64(p.LastStableOffset)
-			encoder.PutInt64(p.LogStartOffset)
-
-			encoder.PutCompactArrayLen(len(p.AbortedTransactions))
-			encoder.PutInt32(p.PreferredReadReplica)
-
-			if len(p.Records) > 0 {
-				encoder.PutCompactBytes(p.Records)
-			} else {
-				encoder.PutCompactArrayLen(len(p.Records))
-			}
-
-			encoder.EndStruct()
-		}
-		encoder.EndStruct()
-	}
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getListOffsetsResponse(req types.Request) []byte {
@@ -680,7 +470,7 @@ func getListOffsetsResponse(req types.Request) []byte {
 		decoder.EndStruct()
 		listOffsetsRequest.Topics = append(listOffsetsRequest.Topics, topic)
 	}
-	// log.Debug("listOffsetsRequest %+v", listOffsetsRequest)
+	log.Debug("listOffsetsRequest %+v", listOffsetsRequest)
 
 	response := ListOffsetsResponse{}
 	for _, t := range listOffsetsRequest.Topics {
@@ -704,22 +494,5 @@ func getListOffsetsResponse(req types.Request) []byte {
 	log.Debug("ListOffsetsResponse %+v", response)
 
 	encoder := serde.NewEncoder()
-	encoder.PutInt32(req.CorrelationID)
-	encoder.EndStruct() // end header
-	encoder.PutInt32(response.ThrottleTimeMs)
-	encoder.PutCompactArrayLen(len(response.Topics))
-	for _, t := range response.Topics {
-		encoder.PutCompactString(t.Name)
-		encoder.PutCompactArrayLen(len(t.Partitions))
-		for _, p := range t.Partitions {
-			encoder.PutInt32(p.PartitionIndex)
-			encoder.PutInt16(p.ErrorCode)
-			encoder.PutInt64(p.Timestamp)
-			encoder.PutInt64(p.Offset)
-			encoder.PutInt32(p.LeaderEpoch)
-			encoder.EndStruct()
-		}
-		encoder.EndStruct()
-	}
-	return encoder.FinishAndReturn()
+	return encoder.EncodeResponseBytes(req, response)
 }

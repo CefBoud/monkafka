@@ -51,7 +51,7 @@ func LoadTopicsState() (types.TopicsState, error) {
 			state.TopicStateInstance[types.TopicName(topicName)][types.PartitionIndex(index)] = &types.Partition{Segments: segments, Index: uint32(index), TopicName: topicName}
 		}
 	}
-	log.Debug("loadTopicsState %v", state.TopicStateInstance)
+	log.Info("loadTopicsState %v", state.TopicStateInstance)
 	return state.TopicStateInstance, err
 }
 
@@ -98,7 +98,8 @@ func AppendRecord(topic string, partition uint32, recordBytes []byte) error {
 
 // getClosestIndexEntryIndex finds the closest index entry for the given offset using binary search.
 func getClosestIndexEntryIndex(offset uint32, indexData []byte) int {
-	left, right := 0, len(indexData)/8-1
+	lastEntry := len(indexData)/8 - 1
+	left, right := 0, lastEntry
 	var mid int
 	var closestOffset uint32
 	for left <= right {
@@ -111,6 +112,10 @@ func getClosestIndexEntryIndex(offset uint32, indexData []byte) int {
 		} else {
 			left = mid + 1
 		}
+	}
+	// in case offset is greater than the latest one, left will exceed lastEntry
+	if left >= lastEntry {
+		return lastEntry
 	}
 	// Return the closest greater index
 	return left

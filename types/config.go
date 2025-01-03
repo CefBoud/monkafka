@@ -3,7 +3,7 @@ package types
 // Configuration represents the broker configuration and settings
 type Configuration struct {
 	LogDir                      string
-	BrokerHost                  string
+	BrokerHost                  string `kafka:"CompactString"`
 	BrokerPort                  uint32
 	FlushIntervalMs             uint64 // flush.ms:time in ms that a message in any topic is kept in memory before flushed to disk.
 	LogRetentionCheckIntervalMs uint64 // check interval to manage log retention

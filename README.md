@@ -88,10 +88,13 @@ go test -v  ./...
 - [X] Multiple log segments per partition
 - [ ] Improve Consumer offsets management
 - [ ] Parse requests properly (so far, only necessary fields are parsed)
+- [ ] Compression
+- [ ] SSL / ACls 
 - [ ] Configurability 
+- [ ] Honor more produce and consume options
 - [ ] Better concurrency
 - [ ] Error handling (e.g. topic not found)
-- [ ] Honor more produce and consume options
+- [ ] Transactions
 - [ ] Distributed system / multiple brokers
 
 

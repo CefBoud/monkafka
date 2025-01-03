@@ -57,3 +57,8 @@ func Warn(message string, a ...any) {
 func Error(message string, a ...any) {
 	Log(ERROR, message, a...)
 }
+
+// Panic exists with a panic
+func Panic(message string, a ...any) {
+	panic(fmt.Sprintf(message, a...))
+}

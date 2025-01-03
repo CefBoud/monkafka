@@ -9,16 +9,17 @@ type APIKey struct {
 
 // APIVersionsResponse represents the response for API versions request.
 type APIVersionsResponse struct {
-	ErrorCode uint16
-	APIKeys   []APIKey
+	ErrorCode    uint16
+	APIKeys      []APIKey
+	ThrottleTime uint32
 }
 
 // MetadataResponseBroker represents a broker in a metadata response.
 type MetadataResponseBroker struct {
 	NodeID uint32
-	Host   string
+	Host   string `kafka:"CompactString"`
 	Port   uint32
-	Rack   string // nullable: if empty, length is -1
+	Rack   string `kafka:"CompactString"`
 }
 
 // MetadataResponsePartition represents partition information in a metadata response.
@@ -34,8 +35,8 @@ type MetadataResponsePartition struct {
 
 // MetadataResponseTopic represents a topic in the metadata response.
 type MetadataResponseTopic struct {
-	ErrorCode                 int16
-	Name                      string
+	ErrorCode                 uint16
+	Name                      string `kafka:"CompactString"`
 	TopicID                   [16]byte
 	IsInternal                bool
 	Partitions                []MetadataResponsePartition
@@ -44,10 +45,10 @@ type MetadataResponseTopic struct {
 
 // MetadataResponse represents a metadata response with brokers, topics, and more.
 type MetadataResponse struct {
-	ThrottleTimeMs int32
+	ThrottleTimeMs uint32
 	Brokers        []MetadataResponseBroker
-	ClusterID      string // nullable
-	ControllerID   int32
+	ClusterID      string `kafka:"CompactString"` // nullable
+	ControllerID   uint32
 	Topics         []MetadataResponseTopic
 }
 
@@ -59,10 +60,10 @@ type CreateTopicsResponse struct {
 
 // CreateTopicsResponseTopic represents a topic's creation result.
 type CreateTopicsResponseTopic struct {
-	Name              string
+	Name              string `kafka:"CompactString"`
 	TopicID           [16]byte
 	ErrorCode         uint16
-	ErrorMessage      string
+	ErrorMessage      string `kafka:"CompactString"`
 	NumPartitions     uint32
 	ReplicationFactor uint16
 	Configs           []CreateTopicsResponseConfig
@@ -87,7 +88,7 @@ type InitProducerIDResponse struct {
 
 // ProduceResponseTopicData represents the data for a topic in a produce response.
 type ProduceResponseTopicData struct {
-	Name          string
+	Name          string `kafka:"CompactString"`
 	PartitionData []ProduceResponsePartitionData
 }
 
@@ -105,7 +106,7 @@ type ProduceResponse struct {
 
 // ProduceTopicResponse represents the response for a topic in a produce request.
 type ProduceTopicResponse struct {
-	Name                      string
+	Name                      string `kafka:"CompactString"`
 	ProducePartitionResponses []ProducePartitionResponse
 }
 
@@ -117,7 +118,7 @@ type ProducePartitionResponse struct {
 	LogAppendTimeMs uint64
 	LogStartOffset  uint64
 	RecordErrors    []RecordError
-	ErrorMessage    string // compact_nullable
+	ErrorMessage    string `kafka:"CompactString"`
 }
 
 // RecordError represents an error in a specific batch of records.
@@ -126,20 +127,41 @@ type RecordError struct {
 	BatchIndexErrorMessage string // compact_nullable
 }
 
-// FindCoordinatorResponseCoordinator represents the response for a coordinator finding request.
+// FindCoordinatorResponse represents the response for a coordinator finding request.
+type FindCoordinatorResponse struct {
+	ThrottleTimeMs uint32
+	Coordinators   []FindCoordinatorResponseCoordinator
+}
+
+// FindCoordinatorResponseCoordinator represents  a coordinator.
 type FindCoordinatorResponseCoordinator struct {
-	Key          string
+	Key          string `kafka:"CompactString"`
 	NodeID       uint32
-	Host         string
+	Host         string `kafka:"CompactString"`
 	Port         uint32
 	ErrorCode    uint16
-	ErrorMessage string
+	ErrorMessage string `kafka:"CompactString"`
+}
+
+// SyncGroupResponse represents a SyncGroup
+type SyncGroupResponse struct {
+	ThrottleTimeMs  uint32
+	ErrorCode       uint16
+	ProtocolType    string `kafka:"CompactString"`
+	ProtocolName    string `kafka:"CompactString"`
+	AssignmentBytes []byte
+}
+
+// HeartbeatResponse represents a HearBeat
+type HeartbeatResponse struct {
+	ThrottleTimeMs uint32
+	ErrorCode      uint16
 }
 
 // JoinGroupResponseMember represents a member in a join group response.
 type JoinGroupResponseMember struct {
-	MemberID        string
-	GroupInstanceID string
+	MemberID        string `kafka:"CompactString"`
+	GroupInstanceID string `kafka:"CompactString"`
 	Metadata        []byte
 }
 
@@ -148,11 +170,11 @@ type JoinGroupResponse struct {
 	ThrottleTimeMS uint32
 	ErrorCode      uint16
 	GenerationID   uint32
-	ProtocolType   string
-	ProtocolName   string
-	Leader         string
+	ProtocolType   string `kafka:"CompactString"`
+	ProtocolName   string `kafka:"CompactString"`
+	Leader         string `kafka:"CompactString"`
 	SkipAssignment bool
-	MemberID       string
+	MemberID       string `kafka:"CompactString"`
 	Members        []JoinGroupResponseMember
 }
 
@@ -164,7 +186,7 @@ type OffsetFetchResponse struct {
 
 // OffsetFetchGroup represents a group in an offset fetch response.
 type OffsetFetchGroup struct {
-	GroupID   string
+	GroupID   string `kafka:"CompactString"`
 	Topics    []OffsetFetchTopic
 	ErrorCode uint16
 }
@@ -195,7 +217,7 @@ type FetchResponse struct {
 
 // FetchTopicResponse represents the response for a topic in a fetch request.
 type FetchTopicResponse struct {
-	TopicName  string
+	TopicName  string `kafka:"CompactString"`
 	Partitions []FetchPartitionResponse
 }
 
@@ -252,7 +274,7 @@ type ListOffsetsResponse struct {
 
 // ListOffsetsResponseTopic represents a topic in a list offsets response.
 type ListOffsetsResponseTopic struct {
-	Name       string
+	Name       string `kafka:"CompactString"`
 	Partitions []ListOffsetsResponsePartition
 }
 
@@ -285,7 +307,7 @@ type OffsetCommitRequestPartition struct {
 	PartitionIndex       uint32
 	CommittedOffset      uint64
 	CommittedLeaderEpoch uint32
-	CommittedMetadata    string
+	CommittedMetadata    string `kafka:"CompactString"`
 }
 
 // OffsetCommitResponse represents the response to an offset commit request.
@@ -296,7 +318,7 @@ type OffsetCommitResponse struct {
 
 // OffsetCommitResponseTopic represents a topic in an offset commit response.
 type OffsetCommitResponseTopic struct {
-	Name       string
+	Name       string `kafka:"CompactString"`
 	Partitions []OffsetCommitResponsePartition
 }
 
