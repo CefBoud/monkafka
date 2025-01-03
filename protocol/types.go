@@ -1,53 +1,63 @@
 package protocol
 
-// Responses
+// APIKey represents an API key and its supported version range.
 type APIKey struct {
-	ApiKey     uint16
+	APIKey     uint16
 	MinVersion uint16
 	MaxVersion uint16
 }
 
+// APIVersionsResponse represents the response for API versions request.
 type APIVersionsResponse struct {
 	ErrorCode uint16
-	ApiKeys   []APIKey
+	APIKeys   []APIKey
 }
 
+// MetadataResponseBroker represents a broker in a metadata response.
 type MetadataResponseBroker struct {
-	Node_id uint32
-	Host    string
-	Port    uint32
-	Rack    string //nullable: if it is empty, we set length to -1
-}
-type MetadataResponsePartition struct {
-	Error_code       uint16
-	Partition_index  uint32
-	Leader_id        uint32
-	Leader_epoch     uint32
-	Replica_nodes    []uint32
-	Isr_nodes        []uint32
-	Offline_replicas []uint32
-}
-type MetadataResponseTopic struct {
-	Error_code                  int16
-	Name                        string
-	Topic_id                    [16]byte
-	Is_internal                 bool
-	Partitions                  []MetadataResponsePartition
-	Topic_authorized_operations uint32
-}
-type MetadataResponse struct {
-	Throttle_time_ms int32
-	Brokers          []MetadataResponseBroker
-	Cluster_id       string //nullable
-	Controller_id    int32
-	Topics           []MetadataResponseTopic
+	NodeID uint32
+	Host   string
+	Port   uint32
+	Rack   string // nullable: if empty, length is -1
 }
 
+// MetadataResponsePartition represents partition information in a metadata response.
+type MetadataResponsePartition struct {
+	ErrorCode       uint16
+	PartitionIndex  uint32
+	LeaderID        uint32
+	LeaderEpoch     uint32
+	ReplicaNodes    []uint32
+	IsrNodes        []uint32
+	OfflineReplicas []uint32
+}
+
+// MetadataResponseTopic represents a topic in the metadata response.
+type MetadataResponseTopic struct {
+	ErrorCode                 int16
+	Name                      string
+	TopicID                   [16]byte
+	IsInternal                bool
+	Partitions                []MetadataResponsePartition
+	TopicAuthorizedOperations uint32
+}
+
+// MetadataResponse represents a metadata response with brokers, topics, and more.
+type MetadataResponse struct {
+	ThrottleTimeMs int32
+	Brokers        []MetadataResponseBroker
+	ClusterID      string // nullable
+	ControllerID   int32
+	Topics         []MetadataResponseTopic
+}
+
+// CreateTopicsResponse represents the response to a topic creation request.
 type CreateTopicsResponse struct {
 	ThrottleTimeMs uint32
 	Topics         []CreateTopicsResponseTopic
 }
 
+// CreateTopicsResponseTopic represents a topic's creation result.
 type CreateTopicsResponseTopic struct {
 	Name              string
 	TopicID           [16]byte
@@ -58,6 +68,7 @@ type CreateTopicsResponseTopic struct {
 	Configs           []CreateTopicsResponseConfig
 }
 
+// CreateTopicsResponseConfig represents a configuration for a topic.
 type CreateTopicsResponseConfig struct {
 	Name         string
 	Value        string
@@ -66,30 +77,39 @@ type CreateTopicsResponseConfig struct {
 	IsSensitive  bool
 }
 
-type InitProducerIdResponse struct {
-	Throttle_time_ms uint32
-	Error_code       uint16
-	Producer_id      uint64
-	Producer_epoch   uint16
+// InitProducerIDResponse represents the response to a producer ID initialization request.
+type InitProducerIDResponse struct {
+	ThrottleTimeMs uint32
+	ErrorCode      uint16
+	ProducerID     uint64
+	ProducerEpoch  uint16
 }
 
-// produce
+// ProduceResponseTopicData represents the data for a topic in a produce response.
 type ProduceResponseTopicData struct {
-	Name           string
-	Partition_data []ProduceResponsePartitionData
+	Name          string
+	PartitionData []ProduceResponsePartitionData
 }
+
+// ProduceResponsePartitionData represents partition-level data for a produce response.
 type ProduceResponsePartitionData struct {
 	Index       uint32
 	RecordsData []byte
 }
+
+// ProduceResponse represents the response to a produce request.
 type ProduceResponse struct {
 	ProduceTopicResponses []ProduceTopicResponse
 	ThrottleTimeMs        uint32
 }
+
+// ProduceTopicResponse represents the response for a topic in a produce request.
 type ProduceTopicResponse struct {
 	Name                      string
 	ProducePartitionResponses []ProducePartitionResponse
 }
+
+// ProducePartitionResponse represents the response for a partition in a produce request.
 type ProducePartitionResponse struct {
 	Index           uint32
 	ErrorCode       uint16
@@ -100,12 +120,13 @@ type ProducePartitionResponse struct {
 	ErrorMessage    string // compact_nullable
 }
 
+// RecordError represents an error in a specific batch of records.
 type RecordError struct {
 	BatchIndex             uint32
 	BatchIndexErrorMessage string // compact_nullable
 }
 
-// FindCoordinator
+// FindCoordinatorResponseCoordinator represents the response for a coordinator finding request.
 type FindCoordinatorResponseCoordinator struct {
 	Key          string
 	NodeID       uint32
@@ -115,14 +136,14 @@ type FindCoordinatorResponseCoordinator struct {
 	ErrorMessage string
 }
 
-// JoinGroup
-
+// JoinGroupResponseMember represents a member in a join group response.
 type JoinGroupResponseMember struct {
 	MemberID        string
 	GroupInstanceID string
 	Metadata        []byte
 }
 
+// JoinGroupResponse represents the response to a join group request.
 type JoinGroupResponse struct {
 	ThrottleTimeMS uint32
 	ErrorCode      uint16
@@ -135,24 +156,27 @@ type JoinGroupResponse struct {
 	Members        []JoinGroupResponseMember
 }
 
-// Offset Fetch
+// OffsetFetchResponse represents the response to an offset fetch request.
 type OffsetFetchResponse struct {
 	ThrottleTimeMs uint32
 	Groups         []OffsetFetchGroup
 }
 
+// OffsetFetchGroup represents a group in an offset fetch response.
 type OffsetFetchGroup struct {
 	GroupID   string
 	Topics    []OffsetFetchTopic
 	ErrorCode uint16
 }
 
+// OffsetFetchTopic represents a topic in an offset fetch response.
 type OffsetFetchTopic struct {
 	Name       string
 	Partitions []OffsetFetchPartition
 	ErrorCode  uint16
 }
 
+// OffsetFetchPartition represents a partition in an offset fetch response.
 type OffsetFetchPartition struct {
 	PartitionIndex       uint32
 	CommittedOffset      uint64
@@ -161,19 +185,21 @@ type OffsetFetchPartition struct {
 	ErrorCode            uint16
 }
 
-// Fetch
+// FetchResponse represents the response to a fetch request.
 type FetchResponse struct {
 	ThrottleTimeMs uint32
 	ErrorCode      uint16
-	SessionId      uint32
+	SessionID      uint32
 	Responses      []FetchTopicResponse
 }
 
+// FetchTopicResponse represents the response for a topic in a fetch request.
 type FetchTopicResponse struct {
 	TopicName  string
 	Partitions []FetchPartitionResponse
 }
 
+// FetchPartitionResponse represents the response for a partition in a fetch request.
 type FetchPartitionResponse struct {
 	PartitionIndex       uint32
 	ErrorCode            uint16
@@ -185,46 +211,52 @@ type FetchPartitionResponse struct {
 	Records              []byte
 }
 
+// AbortedTransaction represents an aborted transaction in the fetch response.
 type AbortedTransaction struct {
-	ProducerId  uint64
+	ProducerID  uint64
 	FirstOffset uint64
 }
 
-// ListOffsets
-
+// ListOffsetsRequest represents a request to list offsets for specific partitions.
 type ListOffsetsRequest struct {
 	ReplicaID      uint32
 	IsolationLevel uint8
 	Topics         []ListOffsetsRequestTopic
 }
 
+// ListOffsetsRequestTopic represents a topic in a list offsets request.
 type ListOffsetsRequestTopic struct {
 	Name       string
 	Partitions []ListOffsetsRequestPartition
 }
 
+// ListOffsetsRequestPartition represents a partition in a list offsets request.
 type ListOffsetsRequestPartition struct {
 	PartitionIndex     uint32
 	CurrentLeaderEpoch uint32
 	Timestamp          uint64
 }
 
+// Constants for list offsets timestamps.
 var (
 	ListOffsetsEarliestTimestamp = -2
 	ListOffsetsLatestTimestamp   = -1
 	ListOffsetsMaxTimestamp      = -3
 )
 
+// ListOffsetsResponse represents the response to a list offsets request.
 type ListOffsetsResponse struct {
 	ThrottleTimeMs uint32
 	Topics         []ListOffsetsResponseTopic
 }
 
+// ListOffsetsResponseTopic represents a topic in a list offsets response.
 type ListOffsetsResponseTopic struct {
 	Name       string
 	Partitions []ListOffsetsResponsePartition
 }
 
+// ListOffsetsResponsePartition represents a partition in a list offsets response.
 type ListOffsetsResponsePartition struct {
 	PartitionIndex uint32
 	ErrorCode      uint16
@@ -233,7 +265,7 @@ type ListOffsetsResponsePartition struct {
 	LeaderEpoch    uint32
 }
 
-// OffsetCommit
+// OffsetCommitRequest represents a request to commit offsets.
 type OffsetCommitRequest struct {
 	GroupID                   string
 	GenerationIDOrMemberEpoch uint32
@@ -242,11 +274,13 @@ type OffsetCommitRequest struct {
 	Topics                    []OffsetCommitRequestTopic
 }
 
+// OffsetCommitRequestTopic represents a topic in an offset commit request.
 type OffsetCommitRequestTopic struct {
 	Name       string
 	Partitions []OffsetCommitRequestPartition
 }
 
+// OffsetCommitRequestPartition represents a partition in an offset commit request.
 type OffsetCommitRequestPartition struct {
 	PartitionIndex       uint32
 	CommittedOffset      uint64
@@ -254,16 +288,19 @@ type OffsetCommitRequestPartition struct {
 	CommittedMetadata    string
 }
 
+// OffsetCommitResponse represents the response to an offset commit request.
 type OffsetCommitResponse struct {
 	ThrottleTimeMs uint32
 	Topics         []OffsetCommitResponseTopic
 }
 
+// OffsetCommitResponseTopic represents a topic in an offset commit response.
 type OffsetCommitResponseTopic struct {
 	Name       string
 	Partitions []OffsetCommitResponsePartition
 }
 
+// OffsetCommitResponsePartition represents a partition in an offset commit response.
 type OffsetCommitResponsePartition struct {
 	PartitionIndex uint32
 	ErrorCode      uint16

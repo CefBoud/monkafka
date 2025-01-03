@@ -16,8 +16,8 @@ import (
 	"github.com/CefBoud/monkafka/types"
 )
 
-const LogSuffix = ".log"
-const IndexSuffix = ".index"
+const logSuffix = ".log"
+const indexSuffix = ".index"
 
 func getLogFile(topic string, partition uint32, baseOffset uint64) string {
 
@@ -27,6 +27,7 @@ func getIndexFile(topic string, partition uint32, baseOffset uint64) string {
 	return filepath.Join(GetPartitionDir(topic, partition), fmt.Sprintf("%020d", baseOffset)+".index")
 }
 
+// NewSegment create a new segment for the given partition
 func NewSegment(p *types.Partition) (*types.Segment, error) {
 	var seg *types.Segment
 	segmentStartOffset := p.EndOffset()
@@ -35,12 +36,12 @@ func NewSegment(p *types.Partition) (*types.Segment, error) {
 	}
 	indexFile, err := os.OpenFile(getIndexFile(p.TopicName, p.Index, segmentStartOffset), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Error("Error creating index file:", err)
+		log.Error("Error creating index file: %v", err)
 		return seg, err
 	}
 	logFile, err := os.OpenFile(getLogFile(p.TopicName, p.Index, segmentStartOffset), os.O_RDWR|os.O_CREATE, 0644)
 	if err != nil {
-		log.Error("Error creating segment file:", err)
+		log.Error("Error creating segment file: %v", err)
 		return seg, err
 	}
 
@@ -54,7 +55,7 @@ func NewSegment(p *types.Partition) (*types.Segment, error) {
 	return seg, nil
 }
 
-// A segment with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
+// LoadSegments loads segments with a base offset of [base_offset] would be stored in two files, a [base_offset].index and a [base_offset].log file.
 func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 	var segments []*types.Segment
 	entries, err := os.ReadDir(partitionDir)
@@ -62,13 +63,13 @@ func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 		return nil, err
 	}
 	for _, entry := range entries {
-		if strings.HasSuffix(entry.Name(), LogSuffix) {
+		if strings.HasSuffix(entry.Name(), logSuffix) {
 			logFilePath := filepath.Join(partitionDir, entry.Name())
 			logFile, err := os.OpenFile(logFilePath, os.O_RDWR, 0644)
 			if err != nil {
 				return nil, fmt.Errorf("error opening logFile %v. %v", filepath.Join(partitionDir, entry.Name()), err)
 			}
-			indexFilePath := strings.Replace(logFilePath, LogSuffix, IndexSuffix, 1)
+			indexFilePath := strings.Replace(logFilePath, logSuffix, indexSuffix, 1)
 			indexFile, err := os.OpenFile(indexFilePath, os.O_RDWR, 0644)
 
 			if err != nil {
@@ -85,7 +86,7 @@ func LoadSegments(partitionDir string) ([]*types.Segment, error) {
 			}
 			logFileSize := uint32(stat.Size())
 
-			startOffset, err := strconv.ParseUint(strings.Replace(entry.Name(), LogSuffix, "", 1), 10, 64)
+			startOffset, err := strconv.ParseUint(strings.Replace(entry.Name(), logSuffix, "", 1), 10, 64)
 			if err != nil {
 				return nil, err
 			}
@@ -166,6 +167,8 @@ func deleteOldestSegment(partition *types.Partition) error {
 
 	return nil
 }
+
+// CleanupSegments takes care of segment retention based on time and size
 func CleanupSegments() error {
 	log.Info("Running CleanupSegments")
 	for _, partitionMap := range state.TopicStateInstance {

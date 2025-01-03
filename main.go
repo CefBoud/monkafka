@@ -11,7 +11,7 @@ import (
 	"github.com/CefBoud/monkafka/types"
 )
 
-var Config = types.Configuration{
+var config = types.Configuration{
 	LogDir:                      filepath.Join(os.TempDir(), "MonKafka"),
 	BrokerHost:                  "localhost",
 	BrokerPort:                  9092,
@@ -25,7 +25,7 @@ var Config = types.Configuration{
 
 func main() {
 	// TODO: config from args / env
-	broker := broker.NewBroker(Config)
+	broker := broker.NewBroker(config)
 
 	// log.SetLogLevel(log.DEBUG)
 	signalChannel := make(chan os.Signal, 1)

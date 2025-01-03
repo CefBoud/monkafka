@@ -9,8 +9,9 @@ import (
 	"github.com/CefBoud/monkafka/utils"
 )
 
-const LOG_OVERHEAD = 12 // offset field 8 + length field 4
+// const LogOverhead = 12 // offset field 8 + length field 4
 
+// ReadRecordBatch turns bytes into a RecordBatch struct
 func ReadRecordBatch(b []byte) types.RecordBatch {
 	decoder := serde.NewDecoder(b)
 	recordBatch := types.RecordBatch{}
@@ -23,7 +24,7 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	recordBatch.LastOffsetDelta = decoder.UInt32()
 	recordBatch.BaseTimestamp = decoder.UInt64()
 	recordBatch.MaxTimestamp = decoder.UInt64()
-	recordBatch.ProducerId = decoder.UInt64()
+	recordBatch.ProducerID = decoder.UInt64()
 	recordBatch.ProducerEpoch = decoder.UInt16()
 	recordBatch.BaseSequence = decoder.UInt32()
 	recordBatch.NumRecord = decoder.UInt32()
@@ -33,6 +34,7 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	return recordBatch
 }
 
+// ReadRecord transforms bytes into a Record struct
 func ReadRecord(b []byte) types.Record {
 	decoder := serde.NewDecoder(b)
 	record := types.Record{Attributes: int8(decoder.UInt8())}
@@ -48,20 +50,20 @@ func ReadRecord(b []byte) types.Record {
 	return record
 }
 
-// record batch of just 1 record (for now)
+// NewRecordBatch creates a RecordBatch given the key and value bytes
 // TODO: handle multi records batches and compression
 func NewRecordBatch(recordKey []byte, recordValue []byte) types.RecordBatch {
-	MINUS_ONE := -1
+	MinusOne := -1
 	currentTimestamp := utils.NowAsUnixMilli()
 	rb := types.RecordBatch{
 		Magic: 2,
 		// no compression / (timestampType == CREATE_TIME)
 		Attributes: 0, // For now, with compression and transactions, this needs to change
 		// defaults
-		ProducerId:           uint64(MINUS_ONE),
-		ProducerEpoch:        uint16(MINUS_ONE),
-		BaseSequence:         uint32(MINUS_ONE),
-		PartitionLeaderEpoch: uint32(MINUS_ONE),
+		ProducerID:           uint64(MinusOne),
+		ProducerEpoch:        uint16(MinusOne),
+		BaseSequence:         uint32(MinusOne),
+		PartitionLeaderEpoch: uint32(MinusOne),
 		BaseTimestamp:        currentTimestamp,
 		MaxTimestamp:         currentTimestamp,
 	}
@@ -82,6 +84,8 @@ func NewRecordBatch(recordKey []byte, recordValue []byte) types.RecordBatch {
 
 	return rb
 }
+
+// WriteRecordBatch encodes a record batch into bytes
 func WriteRecordBatch(rb types.RecordBatch) []byte {
 	// attributes after CRC that will be check summed
 	encoder := serde.NewEncoder()
@@ -89,7 +93,7 @@ func WriteRecordBatch(rb types.RecordBatch) []byte {
 	encoder.PutInt32(rb.LastOffsetDelta)
 	encoder.PutInt64(rb.BaseTimestamp)
 	encoder.PutInt64(rb.MaxTimestamp)
-	encoder.PutInt64(rb.ProducerId)
+	encoder.PutInt64(rb.ProducerID)
 	encoder.PutInt16(rb.ProducerEpoch)
 	encoder.PutInt32(rb.BaseSequence)
 	encoder.PutInt32(1) // nb records
@@ -103,7 +107,7 @@ func WriteRecordBatch(rb types.RecordBatch) []byte {
 	// encode final bytes now that we have the CRC
 	encoder = serde.NewEncoder()
 	encoder.PutInt64(rb.BaseOffset) // will be updated on actual append
-	encoder.PutInt32(length)        // or expressed differently: whole size - LOG_OVERHEAD  (offset field 8 + length field 4)
+	encoder.PutInt32(length)        // or expressed differently: whole size - LogOverhead  (offset field 8 + length field 4)
 	encoder.PutInt32(rb.PartitionLeaderEpoch)
 	encoder.PutInt8(rb.Magic) // magic byte
 	encoder.PutInt32(CRC)

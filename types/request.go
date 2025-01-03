@@ -1,11 +1,12 @@
 package types
 
+// Request is the TCP request sent by Kafka clients
 type Request struct {
 	Length            uint32
-	RequestApiKey     uint16
-	RequestApiVersion uint16
+	RequestAPIKey     uint16
+	RequestAPIVersion uint16
 	CorrelationID     uint32
-	ClientId          string
+	ClientID          string
 	ConnectionAddress string
 	Body              []byte
 }

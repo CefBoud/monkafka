@@ -1,5 +1,6 @@
 package types
 
+// Configuration represents the broker configuration and settings
 type Configuration struct {
 	LogDir                      string
 	BrokerHost                  string

@@ -3,37 +3,39 @@ package protocol
 import "github.com/CefBoud/monkafka/types"
 
 // https://kafka.apache.org/protocol#protocol_api_keys
-var ProduceKey = uint16(0)
-var FetchKey = uint16(1)
-var ListOffsetsKey = uint16(2)
-var MetadataKey = uint16(3)
-var OffsetCommitKey = uint16(8)
-var OffsetFetchKey = uint16(9)
-var FindCoordinatorKey = uint16(10)
-var JoinGroupKey = uint16(11)
-var HeartbeatKey = uint16(12)
-var SyncGroupKey = uint16(14)
-var APIVersionKey = uint16(18)
-var CreateTopicKey = uint16(19)
-var InitProducerIdKey = uint16(22)
+var produceKey = uint16(0)
+var fetchKey = uint16(1)
+var listOffsetsKey = uint16(2)
+var metadataKey = uint16(3)
+var offsetCommitKey = uint16(8)
+var offsetFetchKey = uint16(9)
+var findCoordinatorKey = uint16(10)
+var joinGroupKey = uint16(11)
+var heartbeatKey = uint16(12)
+var syncGroupKey = uint16(14)
+var apiVersionKey = uint16(18)
+var createTopicKey = uint16(19)
+var initProducerIDKey = uint16(22)
 
+// APIDispatcher maps the Request key to its handler
 var APIDispatcher = map[uint16]struct {
 	Name    string
 	Handler func(req types.Request) []byte
 }{
-	ProduceKey:         {Name: "Produce", Handler: getProduceResponse},
-	FetchKey:           {Name: "Fetch", Handler: getFetchResponse},
-	ListOffsetsKey:     {Name: "ListOffsets", Handler: getListOffsetsResponse},
-	MetadataKey:        {Name: "Metadata", Handler: getMetadataResponse},
-	OffsetCommitKey:    {Name: "OffsetCommit", Handler: getOffsetCommitResponse},
-	OffsetFetchKey:     {Name: "OffsetFetch", Handler: getOffsetFetchResponse},
-	FindCoordinatorKey: {Name: "FindCoordinator", Handler: getFindCoordinatorResponse},
-	JoinGroupKey:       {Name: "JoinGroup", Handler: getJoinGroupResponse},
-	HeartbeatKey:       {Name: "Heartbeat", Handler: getHeartbeatResponse},
-	SyncGroupKey:       {Name: "SyncGroup", Handler: getSyncGroupResponse},
-	APIVersionKey:      {Name: "APIVersion", Handler: getAPIVersionResponse},
-	CreateTopicKey:     {Name: "CreateTopic", Handler: getCreateTopicResponse},
-	InitProducerIdKey:  {Name: "InitProducerId", Handler: getInitProducerIdResponse},
+	produceKey:         {Name: "Produce", Handler: getProduceResponse},
+	fetchKey:           {Name: "Fetch", Handler: getFetchResponse},
+	listOffsetsKey:     {Name: "ListOffsets", Handler: getListOffsetsResponse},
+	metadataKey:        {Name: "Metadata", Handler: getMetadataResponse},
+	offsetCommitKey:    {Name: "OffsetCommit", Handler: getOffsetCommitResponse},
+	offsetFetchKey:     {Name: "OffsetFetch", Handler: getOffsetFetchResponse},
+	findCoordinatorKey: {Name: "FindCoordinator", Handler: getFindCoordinatorResponse},
+	joinGroupKey:       {Name: "JoinGroup", Handler: getJoinGroupResponse},
+	heartbeatKey:       {Name: "Heartbeat", Handler: getHeartbeatResponse},
+	syncGroupKey:       {Name: "SyncGroup", Handler: getSyncGroupResponse},
+	apiVersionKey:      {Name: "APIVersion", Handler: getAPIVersionResponse},
+	createTopicKey:     {Name: "CreateTopic", Handler: getCreateTopicResponse},
+	initProducerIDKey:  {Name: "InitProducerID", Handler: getInitProducerIDResponse},
 }
 
+// ConsumerOffsetsTopic is the topic where consumers committed offsets are saved
 var ConsumerOffsetsTopic = "__consumer-offsets"

@@ -1,0 +1,62 @@
+name: Go Lint, Vet, and Test with Java
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  lint-vet-test:
+    runs-on: ubuntu-latest
+    env:  
+      GO_VERSION: '1.23'           
+      JAVA_VERSION: '17'           
+      KAFKA_VERSION: '3.9.0'
+      SCALA_VERSION: '2.13'    
+
+    steps:
+      # Checkout the repository
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      # Set up Go
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      # Run Go Lint
+      - name: Run Go Lint
+        run: |
+          go install golang.org/x/lint/golint@latest
+          golint ./...
+
+      # Run Go Vet
+      - name: Run Go Vet
+        run: go vet ./...
+
+      # Install Java
+      - uses: actions/setup-java@v4
+        with:
+          distribution: 'adopt'
+          java-version: ${{ env.JAVA_VERSION }} 
+
+      # Install Kafka by downloading and untaring
+      - name: Download and untar Kafka
+        run: |
+          KAFKA_VERSION="3.9.0"
+          SCALA_VERSION="2.13"
+          KAFKA_TAR="kafka_${SCALA_VERSION}-${KAFKA_VERSION}.tgz"
+          KAFKA_URL="https://dlcdn.apache.org/kafka/${KAFKA_VERSION}/${KAFKA_TAR}"
+          curl -O $KAFKA_URL
+          tar -xvzf $KAFKA_TAR
+          sudo mv kafka_${SCALA_VERSION}-${KAFKA_VERSION} /opt/kafka
+
+      # Run Go Tests
+      - name: Run Go Tests
+        run: |
+          export KAFKA_BIN_DIR=/opt/kafka/bin
+          go test -v ./...
+

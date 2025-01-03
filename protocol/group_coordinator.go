@@ -30,10 +30,10 @@ func serializeConsumerOffsetRecord(request OffsetCommitRequest) [][]byte {
 			// version prefixed serialization
 			encoder.PutInt16(4) // version 4
 			encoder.PutInt64(partition.CommittedOffset)
-			encoder.PutInt32(uint32(MINUS_ONE)) // TODO: proper leaderEpoch
+			encoder.PutInt32(uint32(MinusOne)) // TODO: proper leaderEpoch
 			encoder.PutCompactString(partition.CommittedMetadata)
 			encoder.PutInt64(utils.NowAsUnixMilli()) // commitTimestamp
-			//	encoder.PutInt64(uint64(MINUS_ONE))
+			//	encoder.PutInt64(uint64(MinusOne))
 			encoder.EndStruct()
 			valuesBytes := encoder.Bytes()
 			rb := storage.NewRecordBatch(keyBytes, valuesBytes)
@@ -65,7 +65,7 @@ func deserializeConsumerOffsetRecord(recordBatchBytes []byte) (types.GroupID, ty
 	return groupID, topicPartitionKey, topicPartitionValue
 }
 
-// return the committed offset if it exists, otherwise -1
+// GetCommittedOffset returns the committed offset if it exists, otherwise -1
 func GetCommittedOffset(groupID string, topic string, partition uint32) int64 {
 	state.GetPartition(ConsumerOffsetsTopic, 0).Lock()
 	defer state.GetPartition(ConsumerOffsetsTopic, 0).Unlock()
@@ -78,7 +78,7 @@ func GetCommittedOffset(groupID string, topic string, partition uint32) int64 {
 	return -1
 }
 
-// given a __consumer-offsets record, update the state accordingly
+// UpdateGroupMetadataState  given a __consumer-offsets record, updates the state accordingly
 func UpdateGroupMetadataState(recordBytes []byte) {
 	// use the ConsumerOffsetsTopic's first partition as a lock to the group state
 	state.GetPartition(ConsumerOffsetsTopic, 0).Lock()
@@ -94,7 +94,7 @@ func UpdateGroupMetadataState(recordBytes []byte) {
 
 }
 
-// Load __consumer-offsets metadata
+// LoadGroupMetadataState from __consumer-offsets metadata
 func LoadGroupMetadataState() {
 	if !state.TopicExists(ConsumerOffsetsTopic) {
 		err := storage.CreateTopic(ConsumerOffsetsTopic, 1)
