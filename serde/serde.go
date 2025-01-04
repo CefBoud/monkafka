@@ -247,6 +247,82 @@ func NewDecoder(b []byte) Decoder {
 	return Decoder{b: b}
 }
 
+// Decode decodes the buffer into a struct using reflection
+func (d *Decoder) Decode(x any) any {
+	log.Debug("Decoding x of type: %v", reflect.TypeOf(x))
+	v := reflect.ValueOf(x)
+	k := v.Kind()
+	// we expect pointers so that (CanAddr == true && canSet == True)
+	// `A Value can be changed only if it is addressable and was not obtained by the use of unexported struct fields`
+	// https://pkg.go.dev/reflect#Value.CanSet
+	if k != reflect.Pointer {
+		log.Panic("Decode expects a pointer")
+	}
+	v = v.Elem() // dereference
+	t := v.Type()
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+		value := v.Field(i)
+		log.Debug("Field %v Name %v Type %v Kind %v", i, field.Name, field.Type, field.Type.Kind())
+		decodedValue := reflect.New(field.Type).Elem()
+		if field.Type.Kind() == reflect.Slice {
+			len := int(d.CompactArrayLen())
+			if field.Type.Elem().Kind() == reflect.Struct { // Slice of structs
+				for j := 0; j < len; j++ {
+					elem := reflect.New(field.Type.Elem())                    // pointer to a new struct
+					elem = reflect.ValueOf(d.Decode(elem.Interface())).Elem() // decode into new struct and dereference
+					decodedValue = reflect.Append(decodedValue, elem)
+				}
+			} else {
+				for j := 0; j < len; j++ {
+					elem := reflect.New(field.Type.Elem()).Elem()
+					elem = reflect.ValueOf(d.Get(elem.Interface())) // decode basic type use `Get`
+					decodedValue = reflect.Append(decodedValue, elem)
+				}
+			}
+		} else if field.Type.Kind() == reflect.Struct {
+			decodedValue = reflect.ValueOf(d.Decode(decodedValue))
+		} else {
+			decodedValue = reflect.ValueOf(d.Get(decodedValue.Interface()))
+		}
+		value.Set(decodedValue)
+	}
+	// TODO: this assumes empty tagged fields, tags need to be handled
+	d.EndStruct()
+	return x
+}
+
+// Get encodes input based on its type
+func (d *Decoder) Get(i any) any {
+	switch c := i.(type) {
+	case bool:
+		return d.Bool()
+	case uint8:
+		return d.UInt8()
+	case uint16:
+		return d.UInt16()
+	case uint32:
+		return d.UInt32()
+	case uint64:
+		return d.UInt64()
+	case int:
+		r, _ := d.Varint()
+		return r
+	case uint:
+		r, _ := d.Uvarint()
+		return r
+	case string:
+		return d.CompactString()
+	case []byte:
+		return d.CompactBytes()
+	case [16]byte:
+		return [16]byte(d.GetNBytes(16))
+	default:
+		log.Panic("Unknown type %T", c)
+	}
+	return nil
+}
+
 // UInt32 decodes a uint32 value from the buffer
 func (d *Decoder) UInt32() uint32 {
 	res := Encoding.Uint32(d.b[d.Offset:])

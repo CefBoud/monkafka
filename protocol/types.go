@@ -33,6 +33,19 @@ type MetadataResponsePartition struct {
 	OfflineReplicas []uint32
 }
 
+// MetadataRequest represents a metadata request.
+type MetadataRequest struct {
+	Topics                           []MetadataRequestTopic
+	AllowAutoTopicCreation           bool
+	IncludeTopicAuthorizedOperations bool
+}
+
+// MetadataRequestTopic represents a topic in the metadata request.
+type MetadataRequestTopic struct {
+	TopicID [16]byte
+	Name    string `kafka:"CompactString"`
+}
+
 // MetadataResponseTopic represents a topic in the metadata response.
 type MetadataResponseTopic struct {
 	ErrorCode                 uint16
@@ -69,6 +82,34 @@ type CreateTopicsResponseTopic struct {
 	Configs           []CreateTopicsResponseConfig
 }
 
+// CreateTopicsRequest represents the Kafka request to create topics.
+type CreateTopicsRequest struct {
+	Topics       []CreateTopicsRequestTopic
+	TimeoutMs    uint32
+	ValidateOnly bool
+}
+
+// CreateTopicsRequestTopic represents the details of a topic to be created.
+type CreateTopicsRequestTopic struct {
+	Name              string `kafka:"CompactString"`
+	NumPartitions     uint32
+	ReplicationFactor uint16
+	Assignments       []CreateTopicsRequestAssignment
+	Configs           []CreateTopicsRequestConfig
+}
+
+// CreateTopicsRequestAssignment represents the partition assignments for a topic.
+type CreateTopicsRequestAssignment struct {
+	PartitionIndex uint32
+	BrokerIds      []uint32
+}
+
+// CreateTopicsRequestConfig represents the configuration for a topic.
+type CreateTopicsRequestConfig struct {
+	Name  string `kafka:"CompactString"`
+	Value string `kafka:"CompactNullableString"`
+}
+
 // CreateTopicsResponseConfig represents a configuration for a topic.
 type CreateTopicsResponseConfig struct {
 	Name         string
@@ -76,6 +117,14 @@ type CreateTopicsResponseConfig struct {
 	ReadOnly     bool
 	ConfigSource uint8
 	IsSensitive  bool
+}
+
+// InitProducerIDRequest represents the request for producer ID initialization.
+type InitProducerIDRequest struct {
+	TransactionalID      string `kafka:"CompactString"`
+	TransactionTimeoutMs uint32
+	ProducerID           uint64
+	ProducerEpoch        uint16
 }
 
 // InitProducerIDResponse represents the response to a producer ID initialization request.
@@ -86,16 +135,24 @@ type InitProducerIDResponse struct {
 	ProducerEpoch  uint16
 }
 
-// ProduceResponseTopicData represents the data for a topic in a produce response.
-type ProduceResponseTopicData struct {
-	Name          string `kafka:"CompactString"`
-	PartitionData []ProduceResponsePartitionData
+// ProduceRequest represents the details of a ProduceRequest.
+type ProduceRequest struct {
+	TransactionalID string `kafka:"CompactNullableString"`
+	Acks            uint16
+	TimeoutMs       uint32
+	TopicData       []ProduceRequestTopicData
 }
 
-// ProduceResponsePartitionData represents partition-level data for a produce response.
-type ProduceResponsePartitionData struct {
-	Index       uint32
-	RecordsData []byte
+// ProduceRequestTopicData represents the topic data in a ProduceRequest.
+type ProduceRequestTopicData struct {
+	Name          string `kafka:"CompactString"`
+	PartitionData []ProduceRequestPartitionData
+}
+
+// ProduceRequestPartitionData represents the partition data in a ProduceRequest.
+type ProduceRequestPartitionData struct {
+	Index   uint32
+	Records []byte
 }
 
 // ProduceResponse represents the response to a produce request.
@@ -143,6 +200,23 @@ type FindCoordinatorResponseCoordinator struct {
 	ErrorMessage string `kafka:"CompactString"`
 }
 
+// SyncGroupRequest represents the details of a SyncGroupRequest.
+type SyncGroupRequest struct {
+	GroupID         string `kafka:"CompactString"`
+	GenerationID    uint32
+	MemberID        string `kafka:"CompactString"`
+	GroupInstanceID string `kafka:"CompactNullableString"`
+	ProtocolType    string `kafka:"CompactNullableString"`
+	ProtocolName    string `kafka:"CompactNullableString"`
+	Assignments     []SyncGroupRequestMember
+}
+
+// SyncGroupRequestMember represents a member and its assignment in the SyncGroupRequest.
+type SyncGroupRequestMember struct {
+	MemberID   string `kafka:"CompactString"`
+	Assignment []byte
+}
+
 // SyncGroupResponse represents a SyncGroup
 type SyncGroupResponse struct {
 	ThrottleTimeMs  uint32
@@ -156,6 +230,24 @@ type SyncGroupResponse struct {
 type HeartbeatResponse struct {
 	ThrottleTimeMs uint32
 	ErrorCode      uint16
+}
+
+// JoinGroupRequest represents a JoinGroup request
+type JoinGroupRequest struct {
+	GroupID            string `kafka:"CompactString"`
+	SessionTimeoutMs   uint32
+	RebalanceTimeoutMs uint32
+	MemberID           string `kafka:"CompactString"`
+	GroupInstanceID    string `kafka:"CompactNullableString"` // Nullable fields are represented as empty strings if not set
+	ProtocolType       string `kafka:"CompactString"`
+	Protocols          []JoinGroupRequestProtocol
+	Reason             string `kafka:"CompactNullableString"` // Nullable fields are represented as empty strings if not set
+}
+
+// JoinGroupRequestProtocol represents a protocol in JoinGroupRequest
+type JoinGroupRequestProtocol struct {
+	Name     string `kafka:"CompactString"`
+	Metadata []byte
 }
 
 // JoinGroupResponseMember represents a member in a join group response.
@@ -176,6 +268,26 @@ type JoinGroupResponse struct {
 	SkipAssignment bool
 	MemberID       string `kafka:"CompactString"`
 	Members        []JoinGroupResponseMember
+}
+
+// OffsetFetchRequest represents the offset fetch request.
+type OffsetFetchRequest struct {
+	Groups         []OffsetFetchRequestGroup
+	RequiresStable bool
+}
+
+// OffsetFetchRequestGroup represents a group in OffsetFetchRequest
+type OffsetFetchRequestGroup struct {
+	GroupID     string `kafka:"CompactString"`
+	MemberID    string `kafka:"CompactNullableString"`
+	MemberEpoch uint32
+	Topics      []OffsetFetchRequestTopic
+}
+
+// OffsetFetchRequestTopic represents a topic in OffsetFetchRequestGroup
+type OffsetFetchRequestTopic struct {
+	Name             string `kafka:"CompactString"`
+	PartitionIndexes []uint32
 }
 
 // OffsetFetchResponse represents the response to an offset fetch request.
@@ -205,6 +317,42 @@ type OffsetFetchPartition struct {
 	CommittedLeaderEpoch uint32
 	Metadata             string
 	ErrorCode            uint16
+}
+
+// FetchRequest represents the details of a FetchRequest (Version: 12).
+type FetchRequest struct {
+	ReplicaID           uint32
+	MaxWaitMs           uint32
+	MinBytes            uint32
+	MaxBytes            uint32
+	IsolationLevel      uint8
+	SessionID           uint32
+	SessionEpoch        uint32
+	Topics              []FetchRequestTopic
+	ForgottenTopicsData []FetchRequestForgottenTopic
+	RackID              string `kafka:"CompactString"`
+}
+
+// FetchRequestTopic represents the topic-level data in a FetchRequest.
+type FetchRequestTopic struct {
+	Name       string `kafka:"CompactString"`
+	Partitions []FetchRequestPartitionData
+}
+
+// FetchRequestPartitionData represents the partition-level data in a FetchRequest.
+type FetchRequestPartitionData struct {
+	PartitionIndex     uint32
+	CurrentLeaderEpoch uint32
+	FetchOffset        uint64
+	LastFetchedEpoch   uint32
+	LogStartOffset     uint64
+	PartitionMaxBytes  uint32
+}
+
+// FetchRequestForgottenTopic represents the forgotten topic data in a FetchRequest.
+type FetchRequestForgottenTopic struct {
+	Topic      string `kafka:"CompactString"`
+	Partitions []uint32
 }
 
 // FetchResponse represents the response to a fetch request.

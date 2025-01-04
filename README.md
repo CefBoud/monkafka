@@ -86,8 +86,8 @@ go test -v  ./...
 # TODO
 - [X] Basic Topic Creation, Produce and Fetch.
 - [X] Multiple log segments per partition
+- [X] Parse requests properly 
 - [ ] Improve Consumer offsets management
-- [ ] Parse requests properly (so far, only necessary fields are parsed)
 - [ ] Compression
 - [ ] SSL / ACls 
 - [ ] Configurability 

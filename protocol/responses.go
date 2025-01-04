@@ -58,34 +58,14 @@ func getMetadataResponse(req types.Request) []byte {
 	// An empty array indicates "request metadata for no topics," and a null array is used to
 	// indicate "request metadata for all topics."
 	// TODO: we are only handling empty and non empty array case, null array (all topics) is not handled
-	nbTopics := decoder.CompactArrayLen()
+	metadataRequest := decoder.Decode(&MetadataRequest{}).(*MetadataRequest)
+	log.Debug("metadataRequest %+v", metadataRequest)
 
-	topics := make([]MetadataResponseTopic, nbTopics)
-	topicNameToUUID := make(map[string][16]byte)
-	if nbTopics > 0 {
-		for i := 0; i < int(nbTopics); i++ {
-			uuid := decoder.UUID()
-			name := decoder.CompactString()
-			topicNameToUUID[name] = uuid
-			decoder.EndStruct()
-		}
-	}
+	topics := make([]MetadataResponseTopic, len(metadataRequest.Topics))
 
-	// Auto create topics if requested
-	allowAutoTopicCreation := decoder.Bool()
-	for name := range topicNameToUUID {
-		if !state.TopicExists(name) {
-			if allowAutoTopicCreation {
-				err := storage.CreateTopic(name, 1)
-				if err != nil {
-					log.Error("Error creating topic. %v", err)
-				}
-			}
-		}
-	}
-	for name, uuid := range topicNameToUUID {
-		topic := MetadataResponseTopic{ErrorCode: 0, Name: name, TopicID: uuid, IsInternal: false}
-		for partitionIndex := range state.TopicStateInstance[types.TopicName(name)] {
+	for _, topic := range metadataRequest.Topics {
+		topic := MetadataResponseTopic{ErrorCode: 0, Name: topic.Name, TopicID: topic.TopicID, IsInternal: false}
+		for partitionIndex := range state.TopicStateInstance[types.TopicName(topic.Name)] {
 			topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
 				ErrorCode:      0,
 				PartitionIndex: uint32(partitionIndex),
@@ -94,8 +74,16 @@ func getMetadataResponse(req types.Request) []byte {
 				IsrNodes:       []uint32{1}})
 		}
 		topics = append(topics, topic)
-	}
 
+		if !state.TopicExists(topic.Name) {
+			if metadataRequest.AllowAutoTopicCreation {
+				err := storage.CreateTopic(topic.Name, 1)
+				if err != nil {
+					log.Error("Error creating topic. %v", err)
+				}
+			}
+		}
+	}
 	response := MetadataResponse{
 		ThrottleTimeMs: 0,
 		Brokers: []MetadataResponseBroker{
@@ -117,25 +105,27 @@ func getMetadataResponse(req types.Request) []byte {
 // CreateTopics	(Api key = 19)
 func getCreateTopicResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.CompactArrayLen() //topicsLen
-	topicName := decoder.CompactString()
-	numPartitions := decoder.UInt32()
+	createTopicsRequest := decoder.Decode(&CreateTopicsRequest{}).(*CreateTopicsRequest)
+	log.Debug("CreateTopicsRequest %+v", createTopicsRequest)
 
-	if int32(numPartitions) == -1 {
-		numPartitions = DefaultNumPartition
-	}
-	response := CreateTopicsResponse{
-		Topics: []CreateTopicsResponseTopic{{Name: topicName, TopicID: [16]byte{},
+	response := CreateTopicsResponse{}
+	for _, topic := range createTopicsRequest.Topics {
+		if int32(topic.NumPartitions) == -1 {
+			topic.NumPartitions = DefaultNumPartition
+		}
+		response.Topics = append(response.Topics, CreateTopicsResponseTopic{
+			Name:              topic.Name,
+			TopicID:           [16]byte{},
 			ErrorCode:         0,
 			ErrorMessage:      "",
-			NumPartitions:     numPartitions,
-			ReplicationFactor: 1,
-			Configs:           []CreateTopicsResponseConfig{},
-		}}}
-
-	err := storage.CreateTopic(topicName, numPartitions)
-	if err != nil {
-		log.Error("Error creating topic %v", err)
+			NumPartitions:     topic.NumPartitions,
+			ReplicationFactor: topic.ReplicationFactor,
+			Configs:           []CreateTopicsResponseConfig{}, // TODO handle conf
+		})
+		err := storage.CreateTopic(topic.Name, topic.NumPartitions)
+		if err != nil {
+			log.Error("Error creating topic %v", err)
+		}
 	}
 
 	encoder := serde.NewEncoder()
@@ -145,50 +135,27 @@ func getCreateTopicResponse(req types.Request) []byte {
 // InitProducerID (Api key = 22)
 func getInitProducerIDResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.CompactString() //transactionalID
-	_ = decoder.UInt32()        //transactionTimeoutMs
-	producerID := decoder.UInt64()
-	if int(producerID) == -1 {
-		producerID = 1 // TODO: set this value properly
+	initProducerIDRequest := decoder.Decode(&InitProducerIDRequest{}).(*InitProducerIDRequest)
+	log.Debug(" initProducerIDRequest %+v", initProducerIDRequest)
+
+	if int(initProducerIDRequest.ProducerID) == -1 {
+		initProducerIDRequest.ProducerID = 1 // TODO: set this value properly
 	}
-	epochID := decoder.UInt16()
-	if int16(epochID) == -1 {
-		epochID = 1 // TODO: set this value properly
+	if int16(initProducerIDRequest.ProducerEpoch) == -1 {
+		initProducerIDRequest.ProducerEpoch = 1 // TODO: set this value properly
 	}
 
 	response := InitProducerIDResponse{
-		ProducerID:    producerID,
-		ProducerEpoch: epochID,
+		ProducerID:    initProducerIDRequest.ProducerID,
+		ProducerEpoch: initProducerIDRequest.ProducerEpoch,
 	}
 
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-// ReadTopicData Producer (Api key = 0)
-func ReadTopicData(producerRequest []byte) []ProduceResponseTopicData {
-	var topicData []ProduceResponseTopicData
-
-	decoder := serde.NewDecoder(producerRequest)
-	decoder.Offset += 1 + 2 + 4 // no transactional_id + acks +timeout_ms
-	nbTopics := decoder.CompactArrayLen()
-	for i := 0; i < int(nbTopics); i++ {
-		topicName := decoder.CompactString()
-		nbPartitions := decoder.CompactArrayLen()
-		var partitionData []ProduceResponsePartitionData
-		for j := 0; j < int(nbPartitions); j++ {
-			index := decoder.UInt32()
-			data := decoder.CompactBytes()
-			partitionData = append(partitionData, ProduceResponsePartitionData{Index: index, RecordsData: data})
-			decoder.EndStruct()
-		}
-		topicData = append(topicData, ProduceResponseTopicData{Name: topicName, PartitionData: partitionData})
-	}
-	return topicData
-}
-
-func writeProducedRecords(topicData []ProduceResponseTopicData) error {
-	for _, td := range topicData {
+func writeProducedRecords(produceRequest *ProduceRequest) error {
+	for _, td := range produceRequest.TopicData {
 		for _, pd := range td.PartitionData {
 			partitionDir := storage.GetPartitionDir(td.Name, pd.Index)
 			err := os.MkdirAll(partitionDir, 0750)
@@ -197,34 +164,35 @@ func writeProducedRecords(topicData []ProduceResponseTopicData) error {
 				log.Error("Error creating topic directory: %v", err)
 				return err
 			}
-			err = storage.AppendRecord(td.Name, pd.Index, pd.RecordsData)
+			err = storage.AppendRecord(td.Name, pd.Index, pd.Records)
 			if err != nil {
 				log.Error("Error AppendRecord: %v", err)
 				return err
 			}
 		}
-
 	}
 	return nil
 }
 func getProduceResponse(req types.Request) []byte {
-	topicData := ReadTopicData(req.Body)
-	err := writeProducedRecords(topicData)
+	decoder := serde.NewDecoder(req.Body)
+	produceRequest := decoder.Decode(&ProduceRequest{}).(*ProduceRequest)
+	log.Debug("ProduceRequest %+v", produceRequest)
+
+	err := writeProducedRecords(produceRequest)
 	if err != nil {
 		log.Error("Error opening partition file: %v", err)
 		os.Exit(1)
 	}
 	response := ProduceResponse{}
 
-	for _, td := range topicData {
+	for _, td := range produceRequest.TopicData {
 		produceTopicResponse := ProduceTopicResponse{Name: td.Name}
 		for _, pd := range td.PartitionData {
 			produceTopicResponse.ProducePartitionResponses = append(produceTopicResponse.ProducePartitionResponses, ProducePartitionResponse{Index: pd.Index, LogAppendTimeMs: utils.NowAsUnixMilli(),
-				BaseOffset: 0}) //State[td.name+string(pd.index)]
+				BaseOffset: 0}) // TODO: should this be 0? probably not..
 		}
 		response.ProduceTopicResponses = append(response.ProduceTopicResponses, produceTopicResponse)
 	}
-
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
@@ -245,30 +213,19 @@ func getFindCoordinatorResponse(req types.Request) []byte {
 
 func getJoinGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	groupID := decoder.CompactString()
-	decoder.Offset += 4 + 4 //session_timeout_ms + rebalance_timeout_ms
-	memberID := decoder.CompactString()
-	groupInstanceID := decoder.CompactString()
-	protocolType := decoder.CompactString()
-	var protocolName []string
-	var metadataBytes [][]byte
-	for i := 0; i < int(decoder.CompactArrayLen()); i++ {
-		protocolName = append(protocolName, decoder.CompactString())
-		metadataBytes = append(metadataBytes, decoder.Bytes())
-	}
-
-	log.Debug("getJoinGroupResponse: groupID: %v, groupInstanceID:%v, protcolType: %v, protocolName:%v, metadataBytes: %v", groupID, groupInstanceID, protocolType, protocolName, metadataBytes)
+	joinGroupRequest := decoder.Decode(&JoinGroupRequest{}).(*JoinGroupRequest)
+	log.Debug("joinGroupRequest %+v", joinGroupRequest)
 
 	response := JoinGroupResponse{
 		GenerationID:   1,
-		ProtocolType:   "consumer",
-		ProtocolName:   "range",
-		Leader:         memberID,
+		ProtocolType:   joinGroupRequest.ProtocolType,
+		ProtocolName:   joinGroupRequest.Protocols[0].Name,
+		Leader:         joinGroupRequest.MemberID,
 		SkipAssignment: false, // KIP-814 static membership (when false, the consumer group leader will send the assignments)
-		MemberID:       memberID,
+		MemberID:       joinGroupRequest.MemberID,
 		Members: []JoinGroupResponseMember{
-			{MemberID: memberID,
-				Metadata: metadataBytes[0]},
+			{MemberID: joinGroupRequest.MemberID,
+				Metadata: joinGroupRequest.Protocols[0].Metadata},
 		},
 	}
 
@@ -283,23 +240,14 @@ func getHeartbeatResponse(req types.Request) []byte {
 }
 
 func getSyncGroupResponse(req types.Request) []byte {
-	// get assignment bytes from request
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.CompactString() //groupID
-	_ = decoder.UInt32()        //generationId
-	_ = decoder.CompactString() //memberID
-	_ = decoder.CompactString() //groupInstanceID
+	syncGroupRequest := decoder.Decode(&SyncGroupRequest{}).(*SyncGroupRequest)
 
+	log.Info("SyncGroupRequest %+v", syncGroupRequest)
 	response := SyncGroupResponse{
-		ProtocolType: decoder.CompactString(),
-		ProtocolName: decoder.CompactString(),
-	}
-	nbAssignments := decoder.CompactArrayLen()
-	// TODO : handle this properly
-	for i := 0; i < int(nbAssignments); i++ {
-		_ = decoder.CompactString() //memberID
-		response.AssignmentBytes = decoder.Bytes()
-		decoder.EndStruct()
+		ProtocolType:    syncGroupRequest.ProtocolType,
+		ProtocolName:    syncGroupRequest.ProtocolName,
+		AssignmentBytes: syncGroupRequest.Assignments[0].Assignment, // TODO : handle this properly
 	}
 	//  SyncGroupResponseData(throttleTimeMs=0, errorCode=0, protocolType='consumer', protocolName='range', assignment=[0, 3, 0, 0, 0, 1, 0, 4, 116, 105, 116, 105, 0, 0, 0, 1, 0, 0, 0, 0, -1, -1, -1, -1])
 	encoder := serde.NewEncoder()
@@ -308,67 +256,35 @@ func getSyncGroupResponse(req types.Request) []byte {
 
 func getOffsetFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	_ = decoder.CompactArrayLen()      // nbGroups
-	groupID := decoder.CompactString() //groupID
-	_ = decoder.CompactString()        //memberID
-	_ = decoder.UInt32()               //memberEpoch
-	nbTopics := decoder.CompactArrayLen()
-	topicPartitions := make(map[string][]uint32)
-	for i := uint64(0); i < nbTopics; i++ {
-		topicName := decoder.CompactString()
-		topicPartitions[topicName] = make([]uint32, 0)
-		nbPartitions := decoder.CompactArrayLen()
-		for j := uint64(0); j < nbPartitions; j++ {
-			topicPartitions[topicName] = append(topicPartitions[topicName], decoder.UInt32())
-		}
-		decoder.EndStruct()
-	}
-	response := OffsetFetchResponse{Groups: []OffsetFetchGroup{
-		{GroupID: groupID, Topics: []OffsetFetchTopic{}},
-	}}
+	offsetFetchRequest := decoder.Decode(&OffsetFetchRequest{}).(*OffsetFetchRequest)
+	log.Debug("offsetFetchRequest %+v", offsetFetchRequest)
 
-	for tp, partitions := range topicPartitions {
-		offsetFetchTopic := OffsetFetchTopic{Name: tp}
-		for _, p := range partitions {
-			offsetFetchTopic.Partitions = append(offsetFetchTopic.Partitions, OffsetFetchPartition{
-				PartitionIndex:  p,
-				CommittedOffset: uint64(GetCommittedOffset(groupID, tp, p)), // -1 triggers a ListOffsets request
-			})
+	response := OffsetFetchResponse{}
+	for _, group := range offsetFetchRequest.Groups {
+		g := OffsetFetchGroup{GroupID: group.GroupID}
+
+		for _, topic := range group.Topics {
+			t := OffsetFetchTopic{Name: topic.Name}
+			for _, partitionIndex := range topic.PartitionIndexes {
+				t.Partitions = append(t.Partitions, OffsetFetchPartition{
+					PartitionIndex:  partitionIndex,
+					CommittedOffset: uint64(GetCommittedOffset(g.GroupID, topic.Name, partitionIndex)), // -1 triggers a ListOffsets request
+				})
+			}
+			g.Topics = append(g.Topics, t)
 		}
-		response.Groups[0].Topics = append(response.Groups[0].Topics, offsetFetchTopic)
+		response.Groups = append(response.Groups, g)
 	}
+	log.Debug("OffsetFetchResponse %+v", response)
 
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
 
 func getOffsetCommitResponse(req types.Request) []byte {
-	offsetCommitRequest := OffsetCommitRequest{}
+
 	decoder := serde.NewDecoder(req.Body)
-
-	offsetCommitRequest.GroupID = decoder.CompactString()
-	offsetCommitRequest.GenerationIDOrMemberEpoch = decoder.UInt32()
-	offsetCommitRequest.MemberID = decoder.CompactString()
-	offsetCommitRequest.GroupInstanceID = decoder.CompactString()
-
-	nbTopics := decoder.CompactArrayLen()
-	for i := uint64(0); i < nbTopics; i++ {
-		topic := OffsetCommitRequestTopic{}
-		topic.Name = decoder.CompactString()
-		nbPartitions := decoder.CompactArrayLen()
-		for j := uint64(0); j < nbPartitions; j++ {
-			topic.Partitions = append(topic.Partitions, OffsetCommitRequestPartition{
-				PartitionIndex:       decoder.UInt32(),
-				CommittedOffset:      decoder.UInt64(),
-				CommittedLeaderEpoch: decoder.UInt32(),
-				CommittedMetadata:    decoder.CompactString(),
-			})
-			decoder.EndStruct()
-		}
-		offsetCommitRequest.Topics = append(offsetCommitRequest.Topics, topic)
-		decoder.EndStruct()
-	}
-
+	offsetCommitRequest := decoder.Decode(&OffsetCommitRequest{}).(*OffsetCommitRequest)
 	log.Debug("offsetCommitRequest %+v", offsetCommitRequest)
 
 	for _, recordBytes := range serializeConsumerOffsetRecord(offsetCommitRequest) {
@@ -391,47 +307,29 @@ func getOffsetCommitResponse(req types.Request) []byte {
 
 func getFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	decoder.Offset += 4 + 4 + 4 + 4 + 1 + 4 + 4 // replica_id+ max_wait_ms  + min_bytes +max_bytes +isolation_level + session_id+session_epoch
-	nbTopics := decoder.CompactArrayLen()
-	type PartitionOffset struct {
-		index       uint32
-		fetchOffset uint64
-	}
-	topicPartitions := make(map[string][]PartitionOffset)
-	for i := uint64(0); i < nbTopics; i++ {
+	fetchRequest := decoder.Decode(&FetchRequest{}).(*FetchRequest)
+	log.Debug("fetchRequest %+v", fetchRequest)
 
-		topicName := decoder.CompactString()
-		nbPartitions := decoder.CompactArrayLen()
-		for j := uint64(0); j < nbPartitions; j++ {
-			index := decoder.UInt32()
-			decoder.Offset += 4 // current_leader_epoch
-			fetchOffset := decoder.UInt64()
-			decoder.Offset += 4 + 8 + 4 // last_fetched_epoch + log_start_offset + partition_max_bytes
-			decoder.EndStruct()
-			topicPartitions[topicName] = append(topicPartitions[topicName], PartitionOffset{index: index, fetchOffset: fetchOffset}) //Encoding.Uint32(request[offset:]))
-		}
-		decoder.EndStruct()
-	}
 	numTotalRecordBytes := 0
 	response := FetchResponse{}
-	for tp, partitions := range topicPartitions {
-		fetchTopicResponse := FetchTopicResponse{TopicName: tp}
-		for _, p := range partitions {
-			recordBytes, err := storage.GetRecord(p.fetchOffset, tp, p.index)
+	for _, tp := range fetchRequest.Topics {
+		fetchTopicResponse := FetchTopicResponse{TopicName: tp.Name}
+		for _, p := range tp.Partitions {
+			recordBytes, err := storage.GetRecord(p.FetchOffset, tp.Name, p.PartitionIndex)
 			// log.Debug("getFetchResponse GetRecord recordBytes %v", recordBytes)
 			numTotalRecordBytes += len(recordBytes)
 			if err != nil {
-				log.Error("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.fetchOffset), tp, p.index, err)
+				log.Error("Error while fetching record at currentOffset:%v  for topic %v-%v | err: %v", uint32(p.FetchOffset), tp, p.PartitionIndex, err)
 			}
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
-					PartitionIndex:       p.index,
-					HighWatermark:        state.GetPartition(tp, p.index).EndOffset(), //uint64(MinusOne),
+					PartitionIndex:       p.PartitionIndex,
+					HighWatermark:        state.GetPartition(tp.Name, p.PartitionIndex).EndOffset(), //uint64(MinusOne),
 					LastStableOffset:     uint64(MinusOne),
-					LogStartOffset:       state.GetPartition(tp, p.index).StartOffset(),
+					LogStartOffset:       state.GetPartition(tp.Name, p.PartitionIndex).StartOffset(),
 					PreferredReadReplica: 1,
-					Records:              recordBytes, // []byte(line),
+					Records:              recordBytes,
 				})
 		}
 		response.Responses = append(response.Responses, fetchTopicResponse)
@@ -445,31 +343,9 @@ func getFetchResponse(req types.Request) []byte {
 }
 
 func getListOffsetsResponse(req types.Request) []byte {
+
 	decoder := serde.NewDecoder(req.Body)
-	listOffsetsRequest := ListOffsetsRequest{
-		ReplicaID:      decoder.UInt32(),
-		IsolationLevel: decoder.UInt8(),
-	}
-
-	numTopics := decoder.CompactArrayLen()
-
-	for i := uint64(0); i < numTopics; i++ {
-		topic := ListOffsetsRequestTopic{
-			Name: decoder.CompactString(),
-		}
-		numPartitions := decoder.CompactArrayLen()
-		for j := uint64(0); j < numPartitions; j++ {
-
-			topic.Partitions = append(topic.Partitions, ListOffsetsRequestPartition{
-				PartitionIndex:     decoder.UInt32(),
-				CurrentLeaderEpoch: decoder.UInt32(),
-				Timestamp:          decoder.UInt64(),
-			})
-			decoder.EndStruct()
-		}
-		decoder.EndStruct()
-		listOffsetsRequest.Topics = append(listOffsetsRequest.Topics, topic)
-	}
+	listOffsetsRequest := decoder.Decode(&ListOffsetsRequest{}).(*ListOffsetsRequest)
 	log.Debug("listOffsetsRequest %+v", listOffsetsRequest)
 
 	response := ListOffsetsResponse{}

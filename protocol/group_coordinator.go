@@ -9,7 +9,7 @@ import (
 	"github.com/CefBoud/monkafka/utils"
 )
 
-func serializeConsumerOffsetRecord(request OffsetCommitRequest) [][]byte {
+func serializeConsumerOffsetRecord(request *OffsetCommitRequest) [][]byte {
 	var result [][]byte
 
 	for _, topic := range request.Topics {
