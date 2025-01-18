@@ -148,8 +148,8 @@ func getOffsetSegment(offset uint64, partition *types.Partition) (*types.Segment
 	return nil, nil
 }
 
-// GetRecord retrieves the record corresponding to the specified offset in the partition.
-func GetRecord(offset uint64, topic string, partition uint32) ([]byte, error) {
+// GetRecordBatch retrieves the RecordBatch bytes corresponding to the specified offset in the partition.
+func GetRecordBatch(offset uint64, topic string, partition uint32) ([]byte, error) {
 	log.Debug("GetRecord offset: %v | topic: %v \n\n", offset, topic)
 	partitionState := state.GetPartition(topic, partition)
 	partitionState.RLock()
@@ -198,6 +198,8 @@ func GetRecord(offset uint64, topic string, partition uint32) ([]byte, error) {
 	if n != int(nbRecordByte) || err != nil {
 		return nil, fmt.Errorf("error while reading record offset %v, expected %v bytes and read %v bytes. %v", offset, nbRecordByte, n, err)
 	}
+
+	log.Debug("ReadRecordBatch %+v", ReadRecords(ReadRecordBatch(recordBytes)))
 	return recordBytes, nil
 }
 

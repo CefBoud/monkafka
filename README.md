@@ -1,5 +1,5 @@
 # MonKafka 
-MonKafka is a minimal, zero-dependency implementation of a basic Kafka broker.
+MonKafka is a simple implementation of a basic Kafka broker.
 
 In its current state, the code handles topic creation, produce and consume requests. The mechanics are still very basic and have a long way to go.
 
@@ -86,9 +86,9 @@ go test -v  ./...
 # TODO
 - [X] Basic Topic Creation, Produce and Fetch.
 - [X] Multiple log segments per partition
-- [X] Parse requests properly 
+- [X] Parse requests properly
+- [X] Compression
 - [ ] Improve Consumer offsets management
-- [ ] Compression
 - [ ] SSL / ACls 
 - [ ] Configurability 
 - [ ] Honor more produce and consume options

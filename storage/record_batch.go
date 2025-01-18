@@ -3,6 +3,7 @@ package storage
 import (
 	"hash/crc32"
 
+	"github.com/CefBoud/monkafka/compress"
 	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/serde"
 	"github.com/CefBoud/monkafka/types"
@@ -28,37 +29,53 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	recordBatch.ProducerEpoch = decoder.UInt16()
 	recordBatch.BaseSequence = decoder.UInt32()
 	recordBatch.NumRecord = decoder.UInt32()
-	numBytes, _ := decoder.Varint() // VARINT NOT *U*VARINT
-	recordBatch.Records = decoder.GetNBytes(int(numBytes))
+
+	recordBatch.Records = decoder.GetRemainingBytes()
 	// log.Debug("ReadRecordBatch recordBatch %+v", recordBatch)
 	return recordBatch
 }
 
-// ReadRecord transforms bytes into a Record struct
-func ReadRecord(b []byte) types.Record {
-	decoder := serde.NewDecoder(b)
-	record := types.Record{Attributes: int8(decoder.UInt8())}
+// ReadRecords transforms RecordBatch Record bytes into a slice of Record struct
+func ReadRecords(rb types.RecordBatch) []types.Record {
+	var records []types.Record
+	recordBytes := rb.Records
 
-	record.TimestampDelta, _ = decoder.Varint()
-	record.OffsetDelta, _ = decoder.Varint()
-	numBytes, _ := decoder.Varint() // VARINT NOT *U*VARINT
-	record.Key = decoder.GetNBytes(int(numBytes))
-	numBytes, _ = decoder.Varint() // VARINT NOT *U*VARINT
-	record.Value = decoder.GetNBytes(int(numBytes))
-	// TODO: handle headers
-	// log.Debug("ReadRecord: record: %+v", record)
-	return record
+	if compressor := compress.GetCompressor(rb.Attributes); compressor != nil {
+		decompressed, err := compressor.Decompress(recordBytes)
+		if err != nil {
+			log.Error("error while decompressing RecordBatch %v. Error: %v", rb, err)
+		} else {
+			// TODO: if decompression fails, we still return the corrupt bytes. Better fail?
+			recordBytes = decompressed
+		}
+	}
+
+	decoder := serde.NewDecoder(recordBytes)
+	for i := 0; i < int(rb.NumRecord); i++ {
+		_, _ = decoder.Varint() // length
+		record := types.Record{Attributes: int8(decoder.UInt8())}
+		record.TimestampDelta, _ = decoder.Varint()
+		record.OffsetDelta, _ = decoder.Varint()
+		numBytes, _ := decoder.Varint() // VARINT NOT *U*VARINT
+		record.Key = decoder.GetNBytes(int(numBytes))
+		numBytes, _ = decoder.Varint() // VARINT NOT *U*VARINT
+		record.Value = decoder.GetNBytes(int(numBytes))
+		numBytes, _ = decoder.Varint()   // headers length
+		decoder.GetNBytes(int(numBytes)) // TODO: parse headers
+		records = append(records, record)
+	}
+	return records
 }
 
 // NewRecordBatch creates a RecordBatch given the key and value bytes
 // TODO: handle multi records batches and compression
-func NewRecordBatch(recordKey []byte, recordValue []byte) types.RecordBatch {
+func NewRecordBatch(recordKey []byte, recordValue []byte, attributes uint16) types.RecordBatch {
 	MinusOne := -1
 	currentTimestamp := utils.NowAsUnixMilli()
 	rb := types.RecordBatch{
 		Magic: 2,
 		// no compression / (timestampType == CREATE_TIME)
-		Attributes: 0, // For now, with compression and transactions, this needs to change
+		Attributes: attributes, //3 first bit determine compression: 4 == ZSTD , // 1 == GZIP //
 		// defaults
 		ProducerID:           uint64(MinusOne),
 		ProducerEpoch:        uint16(MinusOne),
@@ -81,6 +98,16 @@ func NewRecordBatch(recordKey []byte, recordValue []byte) types.RecordBatch {
 	encoder.PutVarIntLen()
 
 	rb.Records = encoder.Bytes()
+
+	if compressor := compress.GetCompressor(rb.Attributes); compressor != nil { // 1 == gzip
+		log.Info("NewRecordBatch recordBytes %v compressor %T", rb.Records, compressor)
+		compressed, err := compressor.Compress(rb.Records)
+		if err != nil {
+			log.Error("error while compressing RecordBatch %v. Error: %v", rb, err)
+		}
+		log.Info("NewRecordBatch After compression recordBytes %v", compressed)
+		rb.Records = compressed
+	}
 
 	return rb
 }

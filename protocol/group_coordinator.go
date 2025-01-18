@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"github.com/CefBoud/monkafka/compress"
 	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/serde"
 	"github.com/CefBoud/monkafka/state"
@@ -9,6 +10,7 @@ import (
 	"github.com/CefBoud/monkafka/utils"
 )
 
+// serializeConsumerOffsetRecord encodes an OffsetCommitRequest as list of OffsetCommit record bytes
 func serializeConsumerOffsetRecord(request *OffsetCommitRequest) [][]byte {
 	var result [][]byte
 
@@ -36,16 +38,16 @@ func serializeConsumerOffsetRecord(request *OffsetCommitRequest) [][]byte {
 			//	encoder.PutInt64(uint64(MinusOne))
 			encoder.EndStruct()
 			valuesBytes := encoder.Bytes()
-			rb := storage.NewRecordBatch(keyBytes, valuesBytes)
+
+			attributes := uint16(compress.ZSTD) // compression only uses 3 first bit
+			rb := storage.NewRecordBatch(keyBytes, valuesBytes, attributes)
 			result = append(result, storage.WriteRecordBatch(rb))
 		}
 	}
 	return result
 }
 
-func deserializeConsumerOffsetRecord(recordBatchBytes []byte) (types.GroupID, types.GroupMetadataTopicPartitionKey, types.GroupMetadataTopicPartitionValue) {
-	recordBatch := storage.ReadRecordBatch(recordBatchBytes)
-	record := storage.ReadRecord(recordBatch.Records)
+func deserializeConsumerOffsetRecord(record types.Record) (types.GroupID, types.GroupMetadataTopicPartitionKey, types.GroupMetadataTopicPartitionValue) {
 
 	decoder := serde.NewDecoder(record.Key)
 	_ = decoder.UInt16() // version
@@ -79,18 +81,23 @@ func GetCommittedOffset(groupID string, topic string, partition uint32) int64 {
 }
 
 // UpdateGroupMetadataState  given a __consumer-offsets record, updates the state accordingly
-func UpdateGroupMetadataState(recordBytes []byte) {
+func UpdateGroupMetadataState(recordBatchBytes []byte) {
 	// use the ConsumerOffsetsTopic's first partition as a lock to the group state
 	state.GetPartition(ConsumerOffsetsTopic, 0).Lock()
 	defer state.GetPartition(ConsumerOffsetsTopic, 0).Unlock()
 
-	groupID, topicPartitionKey, topicPartitionValue := deserializeConsumerOffsetRecord(recordBytes)
-	log.Debug("UpdateGroupMetadataState groupID: %v key: %+v, value: %+v ", groupID, topicPartitionKey, topicPartitionValue)
-	_, exists := state.GroupMetadata[groupID]
-	if !exists {
-		state.GroupMetadata[groupID] = make(map[types.GroupMetadataTopicPartitionKey]types.GroupMetadataTopicPartitionValue)
+	recordBatch := storage.ReadRecordBatch(recordBatchBytes)
+	records := storage.ReadRecords(recordBatch)
+
+	for _, record := range records {
+		groupID, topicPartitionKey, topicPartitionValue := deserializeConsumerOffsetRecord(record)
+		log.Debug("UpdateGroupMetadataState groupID: %v key: %+v, value: %+v ", groupID, topicPartitionKey, topicPartitionValue)
+		_, exists := state.GroupMetadata[groupID]
+		if !exists {
+			state.GroupMetadata[groupID] = make(map[types.GroupMetadataTopicPartitionKey]types.GroupMetadataTopicPartitionValue)
+		}
+		state.GroupMetadata[groupID][topicPartitionKey] = topicPartitionValue
 	}
-	state.GroupMetadata[groupID][topicPartitionKey] = topicPartitionValue
 
 }
 
@@ -105,8 +112,8 @@ func LoadGroupMetadataState() {
 		for _, partition := range state.GetPartitions(ConsumerOffsetsTopic) {
 			if !partition.IsEmpty() {
 				for i := partition.StartOffset(); i <= partition.EndOffset(); i++ {
-					recordBytes, _ := storage.GetRecord(i, ConsumerOffsetsTopic, partition.Index)
-					UpdateGroupMetadataState(recordBytes)
+					recordBatchBytes, _ := storage.GetRecordBatch(i, ConsumerOffsetsTopic, partition.Index)
+					UpdateGroupMetadataState(recordBatchBytes)
 				}
 			}
 

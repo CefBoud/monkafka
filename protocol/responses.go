@@ -243,7 +243,7 @@ func getSyncGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	syncGroupRequest := decoder.Decode(&SyncGroupRequest{}).(*SyncGroupRequest)
 
-	log.Info("SyncGroupRequest %+v", syncGroupRequest)
+	// log.Debug("SyncGroupRequest %+v", syncGroupRequest)
 	response := SyncGroupResponse{
 		ProtocolType:    syncGroupRequest.ProtocolType,
 		ProtocolName:    syncGroupRequest.ProtocolName,
@@ -315,7 +315,7 @@ func getFetchResponse(req types.Request) []byte {
 	for _, tp := range fetchRequest.Topics {
 		fetchTopicResponse := FetchTopicResponse{TopicName: tp.Name}
 		for _, p := range tp.Partitions {
-			recordBytes, err := storage.GetRecord(p.FetchOffset, tp.Name, p.PartitionIndex)
+			recordBytes, err := storage.GetRecordBatch(p.FetchOffset, tp.Name, p.PartitionIndex)
 			// log.Debug("getFetchResponse GetRecord recordBytes %v", recordBytes)
 			numTotalRecordBytes += len(recordBytes)
 			if err != nil {
@@ -343,7 +343,6 @@ func getFetchResponse(req types.Request) []byte {
 }
 
 func getListOffsetsResponse(req types.Request) []byte {
-
 	decoder := serde.NewDecoder(req.Body)
 	listOffsetsRequest := decoder.Decode(&ListOffsetsRequest{}).(*ListOffsetsRequest)
 	log.Debug("listOffsetsRequest %+v", listOffsetsRequest)

@@ -6,10 +6,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/CefBoud/monkafka/broker"
+	"github.com/CefBoud/monkafka/compress"
+	"github.com/CefBoud/monkafka/storage"
 	"github.com/CefBoud/monkafka/types"
 )
 
@@ -50,8 +53,8 @@ func TestMain(m *testing.M) {
 	// Teardown logic
 	log.Println("Teardown: Cleaning up resources")
 	broker.Shutdown()
-	log.Printf("deleting LogDir %v", TestConfig.LogDir)
-	os.RemoveAll(TestConfig.LogDir)
+	// log.Printf("deleting LogDir %v", TestConfig.LogDir)
+	// os.RemoveAll(TestConfig.LogDir)
 
 	os.Exit(exitCode)
 }
@@ -193,6 +196,7 @@ func TestGroupOffsetResume(t *testing.T) {
 		t.Error(err.Error())
 	}
 
+	// consumer resumes from last offset at `nbConsumedRecords`
 	consumerCmd = exec.Command(
 		filepath.Join(KafkaBinDir, "kafka-console-consumer.sh"),
 		"--bootstrap-server", BootstrapServers,
@@ -207,5 +211,53 @@ func TestGroupOffsetResume(t *testing.T) {
 	}
 	if !strings.Contains(string(output), nbConsumedRecords) {
 		t.Errorf("Expected kafka-console-consumer output to contain value '%v'. Output: %v", nbConsumedRecords, string(output))
+	}
+}
+
+func TestDecompression(t *testing.T) {
+	nbRecords := 10
+
+	var compressions = map[string]compress.CompressionType{
+		"gzip":   compress.GZIP,
+		"snappy": compress.SNAPPY,
+		"lz4":    compress.LZ4,
+		"zstd":   compress.ZSTD,
+	}
+
+	for compressionName, compressionTypeBits := range compressions {
+		topicName := "test-decompression-" + compressionName
+		cmd := exec.Command(
+			filepath.Join(KafkaBinDir, "kafka-producer-perf-test.sh"),
+			"--topic", topicName,
+			"--num-records", strconv.Itoa(nbRecords),
+			"--payload-monotonic", // payload will be 1,2 ...nbRecords
+			"--throughput", "100000",
+			"--producer-props",
+			"compression.type="+compressionName,
+			"linger.ms=1000", "batch.size=1000", // make sure all records are in the same batch
+			"bootstrap.servers="+BootstrapServers)
+
+		o, err := cmd.Output()
+
+		fmt.Println(string(o))
+		if err != nil {
+			t.Error(err.Error())
+		}
+
+		recordBytes, _ := storage.GetRecordBatch(0, topicName, 0)
+		rb := storage.ReadRecordBatch(recordBytes)
+
+		compressionType := compress.CompressionType(rb.Attributes & 0x07)
+		if compressionType != compressionTypeBits {
+			t.Errorf("Expected %v compression in '%+v'. but found compression code : %v", compressionName, rb, compressionType)
+		}
+
+		// first Record batch should contain all records given linger.ms and batch.size values
+		records := storage.ReadRecords(rb)
+
+		// `nbRecords-1`` because both start at offset 0
+		if string(records[nbRecords-1].Value) != strconv.Itoa(nbRecords-1) {
+			t.Errorf("Expected last record's value in record batch to be '%v'. but found: '%v'", strconv.Itoa(nbRecords-1), string(records[nbRecords-1].Value))
+		}
 	}
 }

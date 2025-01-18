@@ -263,7 +263,7 @@ func (d *Decoder) Decode(x any) any {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 		value := v.Field(i)
-		log.Debug("Field %v Name %v Type %v Kind %v", i, field.Name, field.Type, field.Type.Kind())
+		// log.Debug("Field %v Name %v Type %v Kind %v", i, field.Name, field.Type, field.Type.Kind())
 		decodedValue := reflect.New(field.Type).Elem()
 		if field.Type.Kind() == reflect.Slice {
 			len := int(d.CompactArrayLen())
@@ -416,8 +416,18 @@ func (d *Decoder) CompactBytes() []byte {
 
 // GetNBytes decodes `n` bytes from the buffer
 func (d *Decoder) GetNBytes(n int) []byte {
+	if n <= 0 {
+		return []byte{}
+	}
 	res := d.b[d.Offset : d.Offset+int(n)]
 	d.Offset += int(n)
+	return res
+}
+
+// GetRemainingBytes reads all the remaining bytes
+func (d *Decoder) GetRemainingBytes() []byte {
+	res := d.b[d.Offset:]
+	d.Offset += len(res)
 	return res
 }
 

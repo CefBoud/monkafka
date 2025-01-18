@@ -27,7 +27,7 @@ func main() {
 	// TODO: config from args / env
 	broker := broker.NewBroker(config)
 
-	// log.SetLogLevel(log.DEBUG)
+	log.SetLogLevel(log.DEBUG)
 	signalChannel := make(chan os.Signal, 1)
 	signal.Notify(signalChannel, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
