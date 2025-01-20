@@ -173,6 +173,7 @@ func CleanupSegments() error {
 	log.Info("Running CleanupSegments")
 	for _, partitionMap := range state.TopicStateInstance {
 		for _, partition := range partitionMap {
+
 			activeSegment := partition.ActiveSegment()
 
 			if shouldRollSegment(activeSegment) {
@@ -184,7 +185,8 @@ func CleanupSegments() error {
 			}
 
 			// all segments except the last/active one
-			for _, segment := range partition.Segments[:len(partition.Segments)-1] {
+			endIndex := len(partition.Segments) - 1
+			for _, segment := range partition.Segments[:endIndex] {
 				if shouldDeleteSegment(segment) {
 					log.Info("deleting oldest segment for partition %v-%v \n", partition.TopicName, partition.Index)
 					err := deleteOldestSegment(partition)

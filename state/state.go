@@ -38,3 +38,13 @@ func TopicExists(topic string) bool {
 	_, exists := TopicStateInstance[types.TopicName(topic)]
 	return exists
 }
+
+// PartitionExists checks if a topic exists.
+func PartitionExists(topic string, partition uint32) bool {
+	topicState, exists := TopicStateInstance[types.TopicName(topic)]
+	if !exists {
+		return false
+	}
+	_, exists = topicState[types.PartitionIndex(partition)]
+	return exists
+}

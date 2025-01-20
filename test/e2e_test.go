@@ -261,3 +261,19 @@ func TestDecompression(t *testing.T) {
 		}
 	}
 }
+
+func TestConsumeFromUnknownTopic(t *testing.T) {
+	topicName := "fugazi-topic"
+	consumerCmd := exec.Command(
+		filepath.Join(KafkaBinDir, "/kafka-console-consumer.sh"),
+		"--bootstrap-server", BootstrapServers,
+		"--topic", topicName,
+		"--timeout-ms", "1000",
+		"--consumer-property", "allow.auto.create.topics=false",
+	)
+	output, err := consumerCmd.CombinedOutput()
+
+	if !strings.Contains(string(output), fmt.Sprintf("{%s=UNKNOWN_TOPIC_OR_PARTITION}", topicName)) {
+		t.Errorf("Expected output to contain '{%s=UNKNOWN_TOPIC_OR_PARTITION}'. Output: %v. Err: %v", topicName, string(output), err)
+	}
+}

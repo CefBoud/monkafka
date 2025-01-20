@@ -116,9 +116,7 @@ func LoadGroupMetadataState() {
 					UpdateGroupMetadataState(recordBatchBytes)
 				}
 			}
-
 		}
-
 	}
 
 	log.Info("Loaded GroupMetadataState: %+v", state.GroupMetadata)
