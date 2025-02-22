@@ -78,7 +78,7 @@ type AbortedTransaction struct {
 	FirstOffset uint64
 }
 
-func getFetchResponse(req types.Request) []byte {
+func (b *Broker) getFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	fetchRequest := decoder.Decode(&FetchRequest{}).(*FetchRequest)
 	log.Debug("fetchRequest %+v", fetchRequest)
@@ -88,6 +88,16 @@ func getFetchResponse(req types.Request) []byte {
 	for _, tp := range fetchRequest.Topics {
 		fetchTopicResponse := FetchTopicResponse{TopicName: tp.Name}
 		for _, p := range tp.Partitions {
+			partition, exists := b.FSM.GetPartition(tp.Name, p.PartitionIndex)
+			if !exists {
+				response.ErrorCode = uint16(ErrReplicaNotAvailable.Code)
+				goto FINISH
+			}
+			if partition.LeaderID != b.FSM.NodeID {
+				log.Error("Fetch: Not leader for partition %v-%v", partition.Topic, partition.PartitionIndex)
+				response.ErrorCode = uint16(ErrNotLeaderOrFollower.Code)
+				goto FINISH
+			}
 			recordBytes, err := storage.GetRecordBatch(p.FetchOffset, tp.Name, p.PartitionIndex)
 			// log.Debug("getFetchResponse GetRecord recordBytes %v", recordBytes)
 			numTotalRecordBytes += len(recordBytes)
@@ -97,12 +107,12 @@ func getFetchResponse(req types.Request) []byte {
 
 			fetchTopicResponse.Partitions = append(fetchTopicResponse.Partitions,
 				FetchPartitionResponse{
-					PartitionIndex:       p.PartitionIndex,
-					HighWatermark:        state.GetPartition(tp.Name, p.PartitionIndex).EndOffset(), //uint64(MinusOne),
-					LastStableOffset:     uint64(MinusOne),
-					LogStartOffset:       state.GetPartition(tp.Name, p.PartitionIndex).StartOffset(),
-					PreferredReadReplica: 1,
-					Records:              recordBytes,
+					PartitionIndex:   p.PartitionIndex,
+					HighWatermark:    state.GetPartition(tp.Name, p.PartitionIndex).EndOffset(), //uint64(MinusOne),
+					LastStableOffset: uint64(MinusOne),
+					LogStartOffset:   state.GetPartition(tp.Name, p.PartitionIndex).StartOffset(),
+					// PreferredReadReplica: 1,
+					Records: recordBytes,
 				})
 		}
 		response.Responses = append(response.Responses, fetchTopicResponse)
@@ -111,6 +121,7 @@ func getFetchResponse(req types.Request) []byte {
 		log.Info("There is no data available for this fetch request, waiting for a bit ..")
 		time.Sleep(300 * time.Millisecond) // TODO get this from consumer settings
 	}
+FINISH:
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }

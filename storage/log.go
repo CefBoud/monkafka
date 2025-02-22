@@ -1,8 +1,10 @@
 package storage
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -234,6 +236,38 @@ func CreateTopic(name string, numPartitions uint32) error {
 	return nil
 }
 
+// EnsurePartition creates a partition if it doesn't exist
+func EnsurePartition(topicName string, partitionIndex uint32) error {
+	partitionDir := GetPartitionDir(topicName, partitionIndex)
+	_, err := os.Stat(partitionDir)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		err := os.MkdirAll(partitionDir, 0750)
+		if err != nil {
+			log.Error("error creating partition directory: %v", err)
+			return err
+		}
+		if !state.TopicExists(topicName) {
+			state.TopicStateInstance[types.TopicName(topicName)] = make(map[types.PartitionIndex]*types.Partition)
+		}
+		partition := &types.Partition{
+			TopicName: topicName,
+			Index:     partitionIndex,
+		}
+		segment, err := NewSegment(partition)
+		if err != nil {
+			log.Error("Error creating segment: %v", err)
+			return err
+		}
+		partition.Segments = append(partition.Segments, segment)
+		state.TopicStateInstance[types.TopicName(topicName)][types.PartitionIndex(partitionIndex)] = partition
+		return nil
+	}
+	return err
+}
+
 // GetPartitionDir returns the directory path for the log of a specific partition.
 func GetPartitionDir(topic string, partition uint32) string {
 	return filepath.Join(state.Config.LogDir, topic+"-"+strconv.Itoa(int(partition)))
@@ -267,7 +301,7 @@ func FlushDataToDisk() {
 }
 
 // Startup initializes log management system
-func Startup(Config types.Configuration, shutdown chan bool) {
+func Startup(Config *types.Configuration, shutdown chan bool) {
 	state.Config = Config
 	_, err := LoadTopicsState()
 	if err != nil {

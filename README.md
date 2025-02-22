@@ -11,7 +11,7 @@ I am running `go1.23.4` for my local testing.
 1. Start the server locally on port 9092:
 
     ```go
-    go run main.go
+    go run main.go --bootstrap --node-id 1
 
     Server is listening on port 9092...
     ```
@@ -73,6 +73,20 @@ I am running `go1.23.4` for my local testing.
 
     ```
 
+# Starting a MonKafka Cluster
+Cluster mode operates on a distributed state using the Raft protocol, with membership management monitored by HashiCorp Serf. This combinations is used by the great Consul and Jocko.
+
+
+```shell
+# The first node bootstraps (using `--bootstrap`) the Raft cluster. This needs to be done only once.
+go run main.go --bootstrap --node-id 1 --serf-addr 127.0.0.1:3331
+
+# Subsequent nodes join the cluster via Serf by specifying an existing Serf endpoint with `--serf-join`
+go run main.go --node-id 2 --broker-port 9093 --raft-addr localhost:2222 --serf-addr 127.0.0.1:3332 --serf-join "127.0.0.1:3331"
+
+go run main.go --node-id 3 --broker-port 9094 --raft-addr localhost:2223 --serf-addr 127.0.0.1:3333 --serf-join "127.0.0.1:3331"
+```
+
 # Running tests
 Simple end-to-end tests have been implemented to verify topic creation and basic producer and consumer functionality.
 
@@ -88,6 +102,7 @@ go test -v  ./...
 - [X] Multiple log segments per partition
 - [X] Parse requests properly
 - [X] Compression
+- [ ] Cluster Mode / multiple brokers
 - [ ] Improve Consumer offsets management
 - [ ] SSL / ACls 
 - [ ] Configurability 
@@ -95,7 +110,6 @@ go test -v  ./...
 - [ ] Better concurrency
 - [ ] Error handling (e.g. topic not found)
 - [ ] Transactions
-- [ ] Distributed system / multiple brokers
 
 
 # Credits

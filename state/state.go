@@ -5,7 +5,7 @@ import (
 )
 
 // Config holds the global configuration.
-var Config types.Configuration
+var Config *types.Configuration
 
 // TopicStateInstance holds the state of topics.
 var TopicStateInstance types.TopicsState = make(types.TopicsState)

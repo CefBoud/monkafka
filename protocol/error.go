@@ -53,6 +53,7 @@ var (
 	ErrInvalidReplicationFactor     = Error{Code: 38, Message: "Replication factor is below 1 or larger than the number of available brokers.", IsRetriable: false}
 	ErrInvalidReplicaAssignment     = Error{Code: 39, Message: "Replica assignment is invalid.", IsRetriable: false}
 	ErrInvalidConfig                = Error{Code: 40, Message: "Configuration is invalid.", IsRetriable: false}
+	ErrNotController                = Error{Code: 41, Message: "This is not the correct controller for this cluster.", IsRetriable: true}
 )
 
 // ErrorMap associates error codes with corresponding Error structs
