@@ -20,7 +20,7 @@ type APIVersionsResponse struct {
 }
 
 // APIVersion (Api key = 18)
-func getAPIVersionResponse(req types.Request) []byte {
+func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 	response := APIVersionsResponse{
 		APIKeys: []APIKey{
 			{APIKey: produceKey, MinVersion: 0, MaxVersion: 11},
@@ -36,6 +36,7 @@ func getAPIVersionResponse(req types.Request) []byte {
 			{APIKey: apiVersionKey, MinVersion: 0, MaxVersion: 4},
 			{APIKey: createTopicKey, MinVersion: 0, MaxVersion: 7},
 			{APIKey: initProducerIDKey, MinVersion: 0, MaxVersion: 5},
+			{APIKey: describeConfigsKey, MinVersion: 0, MaxVersion: 4},
 		},
 	}
 

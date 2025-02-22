@@ -3,8 +3,6 @@ package protocol
 import (
 	log "github.com/CefBoud/monkafka/logging"
 	"github.com/CefBoud/monkafka/serde"
-	"github.com/CefBoud/monkafka/state"
-	"github.com/CefBoud/monkafka/storage"
 	"github.com/CefBoud/monkafka/types"
 )
 
@@ -61,55 +59,83 @@ type MetadataResponse struct {
 	Topics         []MetadataResponseTopic
 }
 
-func getMetadataResponse(req types.Request) []byte {
+func (b *Broker) getMetadataResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
+	metadataRequest := decoder.Decode(&MetadataRequest{}).(*MetadataRequest)
+	log.Debug("metadataRequest %+v", metadataRequest)
+	// log.Debug("metadataRequest isBroker Controller %+v", b.IsController())
+	topics := make([]MetadataResponseTopic, len(metadataRequest.Topics))
+
+	brokers := []MetadataResponseBroker{}
+
+	nodes, err := b.GetClusterNodes()
+	if err != nil {
+		log.Error("Error get cluster nodes. %v", err)
+	}
+
+	controllerID := uint32(MinusOne)
+	for i, n := range nodes {
+		log.Debug("Metadata Node %v : %+v", i, n)
+		brokers = append(brokers, MetadataResponseBroker{
+			NodeID: n.NodeID,
+			Host:   n.Host,
+			Port:   n.Port,
+		})
+		if n.IsController {
+			controllerID = n.NodeID
+		}
+	}
+
+	foundController := controllerID != uint32(MinusOne)
+
 	// https://github.com/apache/kafka/blob/430892654bcf45d644e66b532d83aab0f569cb7d/clients/src/main/resources/common/message/MetadataRequest.json#L26-L27
 	// An empty array indicates "request metadata for no topics," and a null array is used to
 	// indicate "request metadata for all topics."
-	// TODO: we are only handling empty and non empty array case, null array (all topics) is not handled
-	metadataRequest := decoder.Decode(&MetadataRequest{}).(*MetadataRequest)
-	log.Debug("metadataRequest %+v", metadataRequest)
-
-	topics := make([]MetadataResponseTopic, len(metadataRequest.Topics))
-
+	// TODO: we are not handling the null array case ..
+	if len(metadataRequest.Topics) == 0 {
+		for t := range b.FSM.Topics {
+			metadataRequest.Topics = append(metadataRequest.Topics, MetadataRequestTopic{Name: t})
+		}
+	}
 	for _, topic := range metadataRequest.Topics {
-		topic := MetadataResponseTopic{ErrorCode: 0, Name: topic.Name, TopicID: topic.TopicID, IsInternal: false}
+		topic := MetadataResponseTopic{Name: topic.Name, TopicID: topic.TopicID, IsInternal: false}
 
-		if state.TopicExists(topic.Name) {
-			for partitionIndex := range state.TopicStateInstance[types.TopicName(topic.Name)] {
-				topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
-					PartitionIndex: uint32(partitionIndex),
-					LeaderID:       1,
-					ReplicaNodes:   []uint32{1},
-					IsrNodes:       []uint32{1}})
-			}
-		} else {
-			if metadataRequest.AllowAutoTopicCreation {
-				err := storage.CreateTopic(topic.Name, 1)
-				if err != nil {
-					log.Error("Error creating topic. %v", err)
+		if foundController {
+			log.Debug("fsm.Topics: %+v", b.FSM.Topics)
+			if b.FSM.TopicExists(topic.Name) {
+				for partitionIndex, partition := range b.FSM.Topics[topic.Name].Partitions {
+					topic.Partitions = append(topic.Partitions, MetadataResponsePartition{
+						PartitionIndex: uint32(partitionIndex),
+						LeaderID:       partition.LeaderID,
+						ReplicaNodes:   []uint32{partition.LeaderID},  // TODO fix this
+						IsrNodes:       []uint32{partition.LeaderID}}) // TODO fix this
 				}
 			} else {
-				topic.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
+				if metadataRequest.AllowAutoTopicCreation {
+					err := b.CreateTopicPartitions(topic.Name, 1, nil)
+					if err != nil {
+						log.Error("Error creating topic. %v", err)
+					}
+				} else {
+					topic.ErrorCode = uint16(ErrUnknownTopicOrPartition.Code)
+				}
 			}
+		} else {
+			topic.ErrorCode = uint16(ErrLeaderNotAvailable.Code)
 		}
 
 		topics = append(topics, topic)
 	}
+
 	response := MetadataResponse{
 		ThrottleTimeMs: 0,
-		Brokers: []MetadataResponseBroker{
-			{
-				NodeID: 1,
-				Host:   state.Config.BrokerHost,
-				Port:   state.Config.BrokerPort,
-				Rack:   ""},
-		},
-		ClusterID:    ClusterID,
-		ControllerID: 1,
-		Topics:       topics,
+		Brokers:        brokers,
+		ClusterID:      ClusterID,
+		ControllerID:   controllerID,
+		Topics:         topics,
 	}
 
+	log.Debug("MetadataResponse %+v", response)
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }

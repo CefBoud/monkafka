@@ -21,7 +21,7 @@ var MinusOne int = -1
 const DefaultNumPartition = 1
 
 // InitProducerID (Api key = 22)
-func getInitProducerIDResponse(req types.Request) []byte {
+func (b *Broker) getInitProducerIDResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	initProducerIDRequest := decoder.Decode(&InitProducerIDRequest{}).(*InitProducerIDRequest)
 	log.Debug(" initProducerIDRequest %+v", initProducerIDRequest)
@@ -42,21 +42,21 @@ func getInitProducerIDResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getFindCoordinatorResponse(req types.Request) []byte {
+func (b *Broker) getFindCoordinatorResponse(req types.Request) []byte {
 	// TODO: get requested coordinator keys
 	response := FindCoordinatorResponse{
 		Coordinators: []FindCoordinatorResponseCoordinator{{
 			Key:    "dummy", //"console-consumer-22229",
 			NodeID: 1,
 			Host:   state.Config.BrokerHost,
-			Port:   state.Config.BrokerPort,
+			Port:   uint32(state.Config.BrokerPort),
 		}},
 	}
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getJoinGroupResponse(req types.Request) []byte {
+func (b *Broker) getJoinGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	joinGroupRequest := decoder.Decode(&JoinGroupRequest{}).(*JoinGroupRequest)
 	log.Debug("joinGroupRequest %+v", joinGroupRequest)
@@ -78,13 +78,13 @@ func getJoinGroupResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getHeartbeatResponse(req types.Request) []byte {
+func (b *Broker) getHeartbeatResponse(req types.Request) []byte {
 	response := HeartbeatResponse{}
 	encoder := serde.NewEncoder()
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getSyncGroupResponse(req types.Request) []byte {
+func (b *Broker) getSyncGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	syncGroupRequest := decoder.Decode(&SyncGroupRequest{}).(*SyncGroupRequest)
 
@@ -99,7 +99,7 @@ func getSyncGroupResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getOffsetFetchResponse(req types.Request) []byte {
+func (b *Broker) getOffsetFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	offsetFetchRequest := decoder.Decode(&OffsetFetchRequest{}).(*OffsetFetchRequest)
 	log.Debug("offsetFetchRequest %+v", offsetFetchRequest)
@@ -126,7 +126,7 @@ func getOffsetFetchResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getOffsetCommitResponse(req types.Request) []byte {
+func (b *Broker) getOffsetCommitResponse(req types.Request) []byte {
 
 	decoder := serde.NewDecoder(req.Body)
 	offsetCommitRequest := decoder.Decode(&OffsetCommitRequest{}).(*OffsetCommitRequest)
@@ -150,7 +150,7 @@ func getOffsetCommitResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func getListOffsetsResponse(req types.Request) []byte {
+func (b *Broker) getListOffsetsResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	listOffsetsRequest := decoder.Decode(&ListOffsetsRequest{}).(*ListOffsetsRequest)
 	log.Debug("listOffsetsRequest %+v", listOffsetsRequest)

@@ -58,7 +58,7 @@ type RecordError struct {
 	BatchIndexErrorMessage string // compact_nullable
 }
 
-func getProduceResponse(req types.Request) []byte {
+func (b *Broker) getProduceResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	produceRequest := decoder.Decode(&ProduceRequest{}).(*ProduceRequest)
 	log.Debug("ProduceRequest %+v", produceRequest)

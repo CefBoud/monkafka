@@ -10,17 +10,25 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/CefBoud/monkafka/broker"
 	"github.com/CefBoud/monkafka/compress"
+	"github.com/CefBoud/monkafka/logging"
+	broker "github.com/CefBoud/monkafka/protocol"
 	"github.com/CefBoud/monkafka/storage"
 	"github.com/CefBoud/monkafka/types"
+	"github.com/hashicorp/serf/serf"
 )
 
 var TestConfig = types.Configuration{
-	LogDir:                      filepath.Join(os.TempDir(), "MonKafkaTest"),
-	BrokerHost:                  "localhost",
-	BrokerPort:                  19092,
-	FlushIntervalMs:             5000,
+	LogDir:          filepath.Join(os.TempDir(), "MonKafkaTest"),
+	BrokerHost:      "localhost",
+	BrokerPort:      19090,
+	FlushIntervalMs: 5000,
+	NodeID:          1,
+
+	Bootstrap:                   true,
+	RaftAddress:                 "localhost:12220",
+	SerfAddress:                 "127.0.0.1:13330",
+	SerfConfig:                  serf.DefaultConfig(),
 	LogRetentionCheckIntervalMs: 1000 * 30,          // 30 sec  //5 * 60 * 1000, // 5 min
 	LogRetentionMs:              3 * 60 * 60 * 1000, // 3h //604800000 (7 days)
 	LogSegmentSizeBytes:         104857600 * 5,      // 500 MiB
@@ -34,6 +42,7 @@ var KafkaBinDir = HomeDir + "/kafka_2.13-3.9.0/bin/" // assumes kafka is in Home
 
 func TestMain(m *testing.M) {
 	// Initialization logic
+	logging.SetLogLevel(logging.DEBUG)
 	log.Println("Setup: Initializing resources")
 	os.RemoveAll(TestConfig.LogDir)
 	v, exists := os.LookupEnv("KAFKA_BIN_DIR")
@@ -44,7 +53,8 @@ func TestMain(m *testing.M) {
 		log.Printf("Ensure Kafka bin dir exists. %v", err)
 		os.Exit(1)
 	}
-	broker := broker.NewBroker(TestConfig)
+	broker := broker.NewBroker(&TestConfig)
+
 	go broker.Startup()
 
 	// Run the tests
@@ -53,9 +63,6 @@ func TestMain(m *testing.M) {
 	// Teardown logic
 	log.Println("Teardown: Cleaning up resources")
 	broker.Shutdown()
-	// log.Printf("deleting LogDir %v", TestConfig.LogDir)
-	// os.RemoveAll(TestConfig.LogDir)
-
 	os.Exit(exitCode)
 }
 
