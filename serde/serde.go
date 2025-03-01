@@ -225,15 +225,26 @@ func (e *Encoder) FinishAndReturn() []byte {
 func ParseHeader(buffer []byte, connAddr string) types.Request {
 	clientIDLen := Encoding.Uint16(buffer[12:])
 
-	return types.Request{
+	req := types.Request{
 		Length:            Encoding.Uint32(buffer),
 		RequestAPIKey:     Encoding.Uint16(buffer[4:]),
 		RequestAPIVersion: Encoding.Uint16(buffer[6:]),
 		CorrelationID:     Encoding.Uint32(buffer[8:]),
 		ClientID:          string(buffer[14 : 14+clientIDLen]),
 		ConnectionAddress: connAddr,
-		Body:              buffer[14+clientIDLen+1:], // + 1 for empty _tagged_fields
 	}
+	bodyStart := 14 + clientIDLen + 1 // + 1 for empty _tagged_fields
+
+	// we only support empty tagged fields
+	if len(buffer) < int(bodyStart) {
+		log.Error("Request header bytes don't include tagged fields, you're using an old unsupported Kafka version.")
+		return req
+	}
+	if buffer[bodyStart-1] != 0 {
+		log.Panic("Request header has non empty _tagged_fields, MonKafka doesn't currently support _tagged_fields.")
+	}
+	req.Body = buffer[bodyStart:]
+	return req
 }
 
 // Decoder is a byte slice and offset
@@ -311,6 +322,8 @@ func (d *Decoder) Get(i any) any {
 	case uint:
 		r, _ := d.Uvarint()
 		return r
+	case types.NonCompactString:
+		return d.String()
 	case string:
 		return d.CompactString()
 	case []byte:
@@ -387,7 +400,6 @@ func (d *Decoder) CompactString() string {
 		return ""
 	}
 	stringLen--
-
 	res := string(d.b[d.Offset : d.Offset+int(stringLen)])
 	d.Offset += int(stringLen)
 	return res
@@ -450,6 +462,7 @@ func (d *Decoder) Uvarint() (uint64, int) {
 func (d *Decoder) Varint() (int64, int) {
 	varint, n := binary.Varint(d.b[d.Offset:])
 	d.Offset += n
+	log.Info("Varint %v nb bytes %v", varint, n)
 	return varint, n
 }
 

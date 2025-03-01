@@ -126,14 +126,12 @@ func shouldRollSegment(segment *types.Segment) bool {
 		(segment.MaxTimestamp > 0 && segment.MaxTimestamp < uint64(time.Now().UnixMilli())-state.Config.LogSegmentMs)
 }
 
-func shouldDeleteSegment(segment *types.Segment) bool {
-
-	return segment.MaxTimestamp < uint64(time.Now().UnixMilli())-state.Config.LogRetentionMs
+func shouldDeleteOldestSegment(partition *types.Partition) bool {
+	segment := partition.Segments[0]
+	return segment.MaxTimestamp > 0 && segment.MaxTimestamp < uint64(time.Now().UnixMilli())-state.Config.LogRetentionMs
 }
 
 func rollPartitionSegment(partition *types.Partition) error {
-	partition.Lock()
-	defer partition.Unlock()
 	activeSegment := partition.ActiveSegment()
 	activeSegment.Lock()
 	defer activeSegment.Unlock()
@@ -146,12 +144,6 @@ func rollPartitionSegment(partition *types.Partition) error {
 }
 
 func deleteOldestSegment(partition *types.Partition) error {
-	partition.Lock()
-	defer partition.Unlock()
-	if len(partition.Segments) < 2 {
-		log.Error("There is only one segment - the active one. Deletion is forbidden")
-		os.Exit(1)
-	}
 	segment := partition.Segments[0]
 	segment.Lock()
 	defer segment.Unlock()
@@ -168,34 +160,38 @@ func deleteOldestSegment(partition *types.Partition) error {
 	return nil
 }
 
+func cleanupPartition(partition *types.Partition) error {
+	partition.Lock()
+	defer partition.Unlock()
+
+	activeSegment := partition.ActiveSegment()
+	if shouldRollSegment(activeSegment) {
+		log.Info("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
+		err := rollPartitionSegment(partition)
+		if err != nil {
+			return fmt.Errorf("error while rolling partition %v-%v segment %v", partition.TopicName, partition.Index, err)
+		}
+	}
+
+	if len(partition.Segments) > 1 {
+		if shouldDeleteOldestSegment(partition) {
+			log.Info("deleting oldest segment for partition %v-%v \n", partition.TopicName, partition.Index)
+			err := deleteOldestSegment(partition)
+			if err != nil {
+				return fmt.Errorf("error while deleting oldest segment for partition %v-%v Error: %v", partition.TopicName, partition.Index, err)
+			}
+		}
+	}
+	return nil
+}
+
 // CleanupSegments takes care of segment retention based on time and size
 func CleanupSegments() error {
 	log.Info("Running CleanupSegments")
 	for _, partitionMap := range state.TopicStateInstance {
 		for _, partition := range partitionMap {
-
-			activeSegment := partition.ActiveSegment()
-
-			if shouldRollSegment(activeSegment) {
-				log.Info("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
-				err := rollPartitionSegment(partition)
-				if err != nil {
-					return fmt.Errorf("error while rolling partition %v-%v segment %v", partition.TopicName, partition.Index, err)
-				}
-			}
-
-			// all segments except the last/active one
-			endIndex := len(partition.Segments) - 1
-			for _, segment := range partition.Segments[:endIndex] {
-				if shouldDeleteSegment(segment) {
-					log.Info("deleting oldest segment for partition %v-%v \n", partition.TopicName, partition.Index)
-					err := deleteOldestSegment(partition)
-					if err != nil {
-						return fmt.Errorf("error while deleting oldest segment for partition %v-%v Error: %v", partition.TopicName, partition.Index, err)
-					}
-					// one segment deletion per cleanup to keep things smooth
-					break
-				}
+			if err := cleanupPartition(partition); err != nil {
+				return fmt.Errorf("error while cleanupPartition %v-%v Error: %v", partition.TopicName, partition.Index, err)
 			}
 		}
 	}

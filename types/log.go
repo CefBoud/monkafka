@@ -75,7 +75,10 @@ func (p *Partition) String() string {
 
 // ActiveSegment returns the most recent segment in the partition.
 func (p *Partition) ActiveSegment() *Segment {
-	return p.Segments[len(p.Segments)-1]
+	if len(p.Segments) > 0 {
+		return p.Segments[len(p.Segments)-1]
+	}
+	return nil
 }
 
 // StartOffset returns the start offset of the first segment in the partition.
@@ -101,7 +104,7 @@ func (p *Partition) EndOffset() uint64 {
 
 // IsEmpty returns true if the partition has no records or segments.
 func (p *Partition) IsEmpty() bool {
-	return p.StartOffset() == p.EndOffset() && p.ActiveSegment().LogFileSize == 0
+	return p.ActiveSegment() == nil || (p.ActiveSegment().LogFileSize == 0 && p.StartOffset() == p.EndOffset())
 }
 
 // TopicsState represents the state of all topics and their partitions.

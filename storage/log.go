@@ -125,6 +125,9 @@ func getClosestIndexEntryIndex(offset uint32, indexData []byte) int {
 
 // getOffsetSegment finds the segment containing the given offset.
 func getOffsetSegment(offset uint64, partition *types.Partition) (*types.Segment, error) {
+	if partition.IsEmpty() {
+		return nil, fmt.Errorf("can't getOffsetSegment: empty partition")
+	}
 	if offset < partition.StartOffset() || offset > partition.EndOffset()+1 {
 		return nil, fmt.Errorf("out of range of offset")
 	}

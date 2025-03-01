@@ -18,10 +18,10 @@ var config = types.Configuration{
 	BrokerPort:                  9092,
 	SerfConfig:                  serf.DefaultConfig(),
 	FlushIntervalMs:             5000,
-	LogRetentionCheckIntervalMs: 1000 * 30,          // 30 sec  //5 * 60 * 1000, // 5 min
-	LogRetentionMs:              3 * 60 * 60 * 1000, // 3h //604800000 (7 days)
-	LogSegmentSizeBytes:         104857600 * 5,      // 500 MiB
-	LogSegmentMs:                1800000,            // 30 min
+	LogRetentionCheckIntervalMs: 1000 * 30,           // 30 sec  //5 * 60 * 1000, // 5 min
+	LogRetentionMs:              24 * 60 * 60 * 1000, // (24h) //604800000 (7 days)
+	LogSegmentSizeBytes:         104857600 * 5,       // 500 MiB
+	LogSegmentMs:                1800000,             // 30 min
 }
 
 func main() {

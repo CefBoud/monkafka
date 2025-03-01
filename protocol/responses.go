@@ -42,20 +42,6 @@ func (b *Broker) getInitProducerIDResponse(req types.Request) []byte {
 	return encoder.EncodeResponseBytes(req, response)
 }
 
-func (b *Broker) getFindCoordinatorResponse(req types.Request) []byte {
-	// TODO: get requested coordinator keys
-	response := FindCoordinatorResponse{
-		Coordinators: []FindCoordinatorResponseCoordinator{{
-			Key:    "dummy", //"console-consumer-22229",
-			NodeID: 1,
-			Host:   state.Config.BrokerHost,
-			Port:   uint32(state.Config.BrokerPort),
-		}},
-	}
-	encoder := serde.NewEncoder()
-	return encoder.EncodeResponseBytes(req, response)
-}
-
 func (b *Broker) getJoinGroupResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
 	joinGroupRequest := decoder.Decode(&JoinGroupRequest{}).(*JoinGroupRequest)

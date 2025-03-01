@@ -16,22 +16,6 @@ type InitProducerIDResponse struct {
 	ProducerEpoch  uint16
 }
 
-// FindCoordinatorResponse represents the response for a coordinator finding request.
-type FindCoordinatorResponse struct {
-	ThrottleTimeMs uint32
-	Coordinators   []FindCoordinatorResponseCoordinator
-}
-
-// FindCoordinatorResponseCoordinator represents  a coordinator.
-type FindCoordinatorResponseCoordinator struct {
-	Key          string `kafka:"CompactString"`
-	NodeID       uint32
-	Host         string `kafka:"CompactString"`
-	Port         uint32
-	ErrorCode    uint16
-	ErrorMessage string `kafka:"CompactString"`
-}
-
 // SyncGroupRequest represents the details of a SyncGroupRequest.
 type SyncGroupRequest struct {
 	GroupID         string `kafka:"CompactString"`

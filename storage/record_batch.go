@@ -19,7 +19,13 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	recordBatch.BaseOffset = decoder.UInt64()
 	recordBatch.BatchLength = decoder.UInt32()
 	recordBatch.PartitionLeaderEpoch = decoder.UInt32()
-	decoder.Offset++
+	recordBatch.Magic = decoder.UInt8()
+	if recordBatch.Magic != 2 {
+		log.Error(`recordBatch Magic is %v. MonKafka only supports magic=2 i.e. record batches for now.
+		v0 and v1 are message sets. Refer to https://kafka.apache.org/documentation/#messageset`,
+			recordBatch.Magic)
+		return recordBatch
+	}
 	recordBatch.CRC = decoder.UInt32()
 	recordBatch.Attributes = decoder.UInt16()
 	recordBatch.LastOffsetDelta = decoder.UInt32()
@@ -31,7 +37,7 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	recordBatch.NumRecord = decoder.UInt32()
 
 	recordBatch.Records = decoder.GetRemainingBytes()
-	// log.Debug("ReadRecordBatch recordBatch %+v", recordBatch)
+	log.Debug("ReadRecordBatch recordBatch %+v", recordBatch)
 	return recordBatch
 }
 

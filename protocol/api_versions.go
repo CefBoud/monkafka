@@ -29,7 +29,7 @@ func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 			{APIKey: metadataKey, MinVersion: 0, MaxVersion: 12},
 			{APIKey: offsetCommitKey, MinVersion: 0, MaxVersion: 9},
 			{APIKey: offsetFetchKey, MinVersion: 0, MaxVersion: 9},
-			{APIKey: findCoordinatorKey, MinVersion: 0, MaxVersion: 6},
+			{APIKey: findCoordinatorKey, MinVersion: 3, MaxVersion: 6},
 			{APIKey: joinGroupKey, MinVersion: 0, MaxVersion: 9},
 			{APIKey: heartbeatKey, MinVersion: 0, MaxVersion: 4},
 			{APIKey: syncGroupKey, MinVersion: 0, MaxVersion: 5},
@@ -46,5 +46,4 @@ func (b *Broker) getAPIVersionResponse(req types.Request) []byte {
 	encoder.Encode(response)
 	encoder.PutLen()
 	return encoder.Bytes()
-
 }
