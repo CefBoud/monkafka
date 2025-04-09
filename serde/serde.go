@@ -462,7 +462,7 @@ func (d *Decoder) Uvarint() (uint64, int) {
 func (d *Decoder) Varint() (int64, int) {
 	varint, n := binary.Varint(d.b[d.Offset:])
 	d.Offset += n
-	log.Info("Varint %v nb bytes %v", varint, n)
+	// log.Trace("Varint %v nb bytes %v", varint, n)
 	return varint, n
 }
 

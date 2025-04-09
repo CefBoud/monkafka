@@ -78,9 +78,43 @@ type AbortedTransaction struct {
 	FirstOffset uint64
 }
 
+func decodeFetchRequest(d serde.Decoder, fetchRequest *FetchRequest) {
+
+	fetchRequest.ReplicaID = d.UInt32()
+	fetchRequest.MaxWaitMs = d.UInt32()
+	fetchRequest.MinBytes = d.UInt32()
+	fetchRequest.MaxBytes = d.UInt32()
+	fetchRequest.IsolationLevel = d.UInt8()
+	fetchRequest.SessionID = d.UInt32()
+	fetchRequest.SessionEpoch = d.UInt32()
+
+	lenTopic := int(d.CompactArrayLen())
+
+	for i := 0; i < lenTopic; i++ {
+		topic := FetchRequestTopic{Name: d.CompactString()}
+		lenPartitions := int(d.CompactArrayLen())
+		for j := 0; j < lenPartitions; j++ {
+			topic.Partitions = append(topic.Partitions, FetchRequestPartitionData{
+				PartitionIndex:     d.UInt32(),
+				CurrentLeaderEpoch: d.UInt32(),
+				FetchOffset:        d.UInt64(),
+				LastFetchedEpoch:   d.UInt32(),
+				LogStartOffset:     d.UInt64(),
+				PartitionMaxBytes:  d.UInt32(),
+			})
+			d.EndStruct()
+		}
+		fetchRequest.Topics = append(fetchRequest.Topics, topic)
+		d.EndStruct()
+	}
+	return
+}
+
 func (b *Broker) getFetchResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	fetchRequest := decoder.Decode(&FetchRequest{}).(*FetchRequest)
+	fetchRequest := &FetchRequest{}
+	// for perf sensitive requests, we don't rely on reflection
+	decodeFetchRequest(decoder, fetchRequest)
 	log.Debug("fetchRequest %+v", fetchRequest)
 
 	numTotalRecordBytes := 0

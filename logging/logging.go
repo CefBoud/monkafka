@@ -8,6 +8,7 @@ import (
 
 // logging levels
 const (
+	TRACE = "TRACE"
 	DEBUG = "DEBUG"
 	INFO  = "INFO"
 	WARN  = "WARN"
@@ -36,6 +37,11 @@ func Log(level, message string, a ...any) {
 		log.SetOutput(os.Stdout)
 		log.Printf("[%s] %s\n", level, fmt.Sprintf(message, a...))
 	}
+}
+
+// Trace logs a message at TRACE level
+func Trace(message string, a ...any) {
+	Log(TRACE, message, a...)
 }
 
 // Debug logs a message at DEBUG level

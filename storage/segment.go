@@ -165,12 +165,16 @@ func cleanupPartition(partition *types.Partition) error {
 	defer partition.Unlock()
 
 	activeSegment := partition.ActiveSegment()
-	if shouldRollSegment(activeSegment) {
-		log.Info("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
-		err := rollPartitionSegment(partition)
-		if err != nil {
-			return fmt.Errorf("error while rolling partition %v-%v segment %v", partition.TopicName, partition.Index, err)
+	if activeSegment != nil {
+		if shouldRollSegment(activeSegment) {
+			log.Info("rolling segment for partition %v-%v \n", partition.TopicName, partition.Index)
+			err := rollPartitionSegment(partition)
+			if err != nil {
+				return fmt.Errorf("error while rolling partition %v-%v segment %v", partition.TopicName, partition.Index, err)
+			}
 		}
+	} else {
+		log.Error("cleanupPartition: partition %v-%v has no active segment", partition.TopicName, partition.Index)
 	}
 
 	if len(partition.Segments) > 1 {

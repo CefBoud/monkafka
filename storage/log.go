@@ -278,12 +278,16 @@ func GetPartitionDir(topic string, partition uint32) string {
 
 // SyncPartition syncs the log and index files of the active segment for the given partition.
 func SyncPartition(partition *types.Partition) error {
-	err := partition.ActiveSegment().LogFile.Sync()
+	activeSegment := partition.ActiveSegment()
+	if activeSegment == nil {
+		return fmt.Errorf("SyncPartition: partition %v-%v has no active segment", partition.TopicName, partition.Index)
+	}
+	err := activeSegment.LogFile.Sync()
 	if err != nil {
 		log.Error("Error syncing SegmentFile for %v: %v", partition, err)
 		return err
 	}
-	err = partition.ActiveSegment().IndexFile.Sync()
+	err = activeSegment.IndexFile.Sync()
 	if err != nil {
 		log.Error("Error syncing IndexFile for %v: %v", partition, err)
 		return err

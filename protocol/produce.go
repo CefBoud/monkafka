@@ -58,9 +58,31 @@ type RecordError struct {
 	BatchIndexErrorMessage string // compact_nullable
 }
 
+func decodeProduceRequest(d serde.Decoder, produceRequest *ProduceRequest) {
+	produceRequest.TransactionalID = d.CompactString()
+	produceRequest.Acks = d.UInt16()
+	produceRequest.TimeoutMs = d.UInt32()
+	lenTopicData := int(d.CompactArrayLen())
+	for i := 0; i < lenTopicData; i++ {
+		topic := ProduceRequestTopicData{Name: d.CompactString()}
+		lenPartitionData := int(d.CompactArrayLen())
+		for j := 0; j < lenPartitionData; j++ {
+			topic.PartitionData = append(topic.PartitionData, ProduceRequestPartitionData{
+				Index: d.UInt32(), Records: d.CompactBytes(),
+			})
+			d.EndStruct()
+		}
+		produceRequest.TopicData = append(produceRequest.TopicData, topic)
+		d.EndStruct()
+	}
+	return
+}
+
 func (b *Broker) getProduceResponse(req types.Request) []byte {
 	decoder := serde.NewDecoder(req.Body)
-	produceRequest := decoder.Decode(&ProduceRequest{}).(*ProduceRequest)
+	produceRequest := &ProduceRequest{}
+	// for perf sensitive requests, we don't rely on reflection
+	decodeProduceRequest(decoder, produceRequest)
 	log.Debug("ProduceRequest %+v", produceRequest)
 	response := ProduceResponse{}
 

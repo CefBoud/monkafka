@@ -104,9 +104,10 @@ func (b *Broker) Startup() {
 func (b *Broker) HandleConnection(conn net.Conn) {
 	defer conn.Close()
 	connectionAddr := conn.RemoteAddr().String()
-	log.Debug("Connection established with %s\n", connectionAddr)
+	log.Info("Connection established with %s\n", connectionAddr)
 
 	for {
+		startTime := time.Now()
 		// First, we read the length, then allocate a byte slice based on it.
 		// ReadFull (not Read) is used to ensure the entire request is read. Partial data would result in parsing errors
 		lengthBuffer := make([]byte, 4)
@@ -127,7 +128,7 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 		}
 		req := serde.ParseHeader(buffer, connectionAddr)
 		apiKeyHandler := b.APIDispatcher(req.RequestAPIKey)
-		log.Debug("Received RequestAPIKey: %v | RequestAPIVersion: %v | CorrelationID: %v | Length: %v \n\n", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, length)
+		log.Info("Received RequestAPIKey: %v | RequestAPIVersion: %v | CorrelationID: %v | Length: %v \n\n", apiKeyHandler.Name, req.RequestAPIVersion, req.CorrelationID, length)
 		response := apiKeyHandler.Handler(req)
 
 		_, err = conn.Write(response)
@@ -135,6 +136,10 @@ func (b *Broker) HandleConnection(conn net.Conn) {
 			log.Error("Error writing to connection: %v\n", err)
 			break
 		}
+		d := time.Now().Sub(startTime)
+
+		log.Trace("handleConnection Iteration took %v", d)
+
 	}
 	log.Debug("Connection with %s closed.\n", connectionAddr)
 }

@@ -37,7 +37,7 @@ func ReadRecordBatch(b []byte) types.RecordBatch {
 	recordBatch.NumRecord = decoder.UInt32()
 
 	recordBatch.Records = decoder.GetRemainingBytes()
-	log.Debug("ReadRecordBatch recordBatch %+v", recordBatch)
+	log.Trace("ReadRecordBatch recordBatch %+v", recordBatch)
 	return recordBatch
 }
 
@@ -106,12 +106,12 @@ func NewRecordBatch(recordKey []byte, recordValue []byte, attributes uint16) typ
 	rb.Records = encoder.Bytes()
 
 	if compressor := compress.GetCompressor(rb.Attributes); compressor != nil { // 1 == gzip
-		log.Info("NewRecordBatch recordBytes %v compressor %T", rb.Records, compressor)
+		log.Info("NewRecordBatch recordByte length s %v compressor %T", len(rb.Records), compressor)
 		compressed, err := compressor.Compress(rb.Records)
 		if err != nil {
 			log.Error("error while compressing RecordBatch %v. Error: %v", rb, err)
 		}
-		log.Info("NewRecordBatch After compression recordBytes %v", compressed)
+		log.Debug("NewRecordBatch After compression recordBytes length %v", len(compressed))
 		rb.Records = compressed
 	}
 

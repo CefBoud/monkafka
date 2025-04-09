@@ -149,7 +149,7 @@ func (b *Broker) getListOffsetsResponse(req types.Request) []byte {
 			if p.Timestamp == uint64(ListOffsetsEarliestTimestamp) {
 				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).StartOffset()
 			} else if p.Timestamp == uint64(ListOffsetsLatestTimestamp) {
-				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).EndOffset()
+				partition.Offset = state.GetPartition(t.Name, p.PartitionIndex).EndOffset() + 1 // +1 to exclude the last msg
 				partition.Timestamp = state.GetPartition(t.Name, p.PartitionIndex).ActiveSegment().MaxTimestamp
 			} else {
 				// TODO: implement ListOffsetsMaxTimestamp
